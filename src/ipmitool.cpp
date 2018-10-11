@@ -1,3 +1,13 @@
+/* ipmitool.cpp
+ *
+ * Copyright (c) 2018 Oak Ridge National Laboratory.
+ * All rights reserved.
+ * See file LICENSE that is included with this distribution.
+ *
+ * @author Klemen Vodopivec
+ * @date Oct 2018
+ */
+
 // Include ipmitool headers
 extern "C" {
 #include <ipmitool/ipmi_intf.h>
