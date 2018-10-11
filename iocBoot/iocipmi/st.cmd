@@ -14,5 +14,6 @@ ipmi_registerRecordDeviceDriver pdbbase
 cd ${TOP}/iocBoot/${IOC}
 iocInit
 
-ipmiConnect ipmi1 192.168.1.252
-ipmiScan ipmi1
+ipmiConnect IPMI1 192.168.1.252
+#ipmiScan IPMI1 verbose
+ipmiDumpDb IPMI1 /tmp/test.db

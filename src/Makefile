@@ -12,6 +12,7 @@ LIBRARY_IOC += epicsipmi
 DBD += epicsipmi.dbd
 
 epicsipmi_SRCS += epicsshell.cpp
+epicsipmi_SRCS += print.cpp
 epicsipmi_SRCS += provider.cpp
 epicsipmi_SRCS += ipmitool.cpp
 
