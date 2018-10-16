@@ -17,7 +17,6 @@ DBD += ipmi.dbd
 # ipmi.dbd will be made up from these files:
 ipmi_DBD += base.dbd
 ipmi_DBD += epicsipmi.dbd
-#ipmi_DBD += Logfile.dbd
 
 # Include dbd files from all support applications:
 #ipmi_DBD += xxx.dbd

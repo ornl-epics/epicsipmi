@@ -23,70 +23,90 @@ void printSensorRecords(FILE *dbfile, const provider::EntityInfo& entity)
 
     auto valprop = entity.properties.find("VAL");
     if (valprop == entity.properties.end() ||
-        (valprop->valtype != provider::EntityInfo::Property::ValueType::IVAL &&
-        valprop->valtype != provider::EntityInfo::Property::ValueType::DVAL)) {
+        (valprop->value.type != provider::EntityInfo::Property::Value::Type::IVAL &&
+        valprop->value.type != provider::EntityInfo::Property::Value::Type::DVAL)) {
 
         return;
     }
-    bool analog = (valprop->valtype != provider::EntityInfo::Property::ValueType::IVAL);
+    bool analog = (valprop->value.type != provider::EntityInfo::Property::Value::Type::IVAL);
 
     fprintf(dbfile, "record(%s, \"$(IPMI)%s\") {\n", (analog ? "ai" : "longin"), entity.name.c_str());
     fprintf(dbfile, "  field(INP,  \"@ipmi(%s)\")\n", valprop->addrspec.c_str());
+    fprintf(dbfile, "  field(DTYP, \"ipmi\")\n");
     fprintf(dbfile, "  field(DESC, \"%s\")\n", entity.description.substr(0, 40).c_str());
 
     auto it = entity.properties.find("UNIT");
     if (it != entity.properties.end()) {
-        fprintf(dbfile, "  field(EGU,  \"%s\")\n", it->sval.c_str());
+        fprintf(dbfile, "  field(EGU,  \"%s\")\n", it->value.sval.c_str());
     }
 
     if (analog) {
 
+        it = entity.properties.find("VAL");
+        if (it != entity.properties.end()) {
+            if (analog)
+                fprintf(dbfile, "  field(VAL,  \"%f\")\n", it->value.dval);
+            else
+                fprintf(dbfile, "  field(VAL,  \"%d\")\n", it->value.ival);
+        }
+
         it = entity.properties.find("PREC");
         if (it != entity.properties.end()) {
-            fprintf(dbfile, "  field(PREC, \"%u\")\n", it->ival);
+            fprintf(dbfile, "  field(PREC, \"%u\")\n", it->value.ival);
         }
 
         it = entity.properties.find("LOPR");
         if (it != entity.properties.end()) {
-            fprintf(dbfile, "  field(LOPR, \"%f\")\n", it->dval);
+            fprintf(dbfile, "  field(LOPR, \"%f\")\n", it->value.dval);
         }
 
         it = entity.properties.find("HOPR");
         if (it != entity.properties.end()) {
-            fprintf(dbfile, "  field(HOPR, \"%f\")\n", it->dval);
+            fprintf(dbfile, "  field(HOPR, \"%f\")\n", it->value.dval);
         }
 
         it = entity.properties.find("LOW");
         if (it != entity.properties.end()) {
-            fprintf(dbfile, "  field(LOW,  \"%f\")\n", it->dval);
+            fprintf(dbfile, "  field(LOW,  \"%f\")\n", it->value.dval);
             fprintf(dbfile, "  field(LSV,  \"MINOR\")\n");
         }
 
         it = entity.properties.find("HIGH");
         if (it != entity.properties.end()) {
-            fprintf(dbfile, "  field(HIGH, \"%f\")\n", it->dval);
+            fprintf(dbfile, "  field(HIGH, \"%f\")\n", it->value.dval);
             fprintf(dbfile, "  field(HSV,  \"MINOR\")\n");
         }
 
         it = entity.properties.find("LOLO");
         if (it != entity.properties.end()) {
-            fprintf(dbfile, "  field(LOLO, \"%f\")\n", it->dval);
+            fprintf(dbfile, "  field(LOLO, \"%f\")\n", it->value.dval);
             fprintf(dbfile, "  field(LLSV, \"MAJOR\")\n");
         }
 
         it = entity.properties.find("HIGHI");
         if (it != entity.properties.end()) {
-            fprintf(dbfile, "  field(HIHI, \"%f\")\n", it->dval);
+            fprintf(dbfile, "  field(HIHI, \"%f\")\n", it->value.dval);
             fprintf(dbfile, "  field(HHSV, \"MAJOR\")\n");
         }
 
         it = entity.properties.find("HYST");
         if (it != entity.properties.end()) {
-            fprintf(dbfile, "  field(HYST, \"%f\")\n", it->dval);
+            fprintf(dbfile, "  field(HYST, \"%f\")\n", it->value.dval);
         }
     }
 
     fprintf(dbfile, "}\n");
+
+    for (auto& property: entity.properties) {
+        if (property.addrspec.empty() || property.name == "VAL")
+            continue;
+
+        fprintf(dbfile, "record(%s, \"$(IPMI)%s:%s\") {\n", (analog ? "ao" : "longout"), entity.name.c_str(), property.name.c_str());
+        fprintf(dbfile, "  field(OUT,  \"@ipmi(%s)\")\n", property.addrspec.c_str());
+        fprintf(dbfile, "  field(DTYP, \"ipmi\")\n");
+        fprintf(dbfile, "  field(FLNK, \"$(IPMI)%s\")\n", property.addrspec.c_str());
+        fprintf(dbfile, "}\n");
+    }
 }
 
 void printDeviceRecords(FILE *dbfile, const provider::EntityInfo& entity)
@@ -99,9 +119,10 @@ void printDeviceRecords(FILE *dbfile, const provider::EntityInfo& entity)
 
     for (auto& property: entity.properties) {
         fprintf(dbfile, "record(stringin, \"$(IPMI)%s:%s\") {\n", entity.name.c_str(), property.name.c_str());
-        fprintf(dbfile, "  field(VAL,  \"%s\")\n", property.sval.c_str());
+        fprintf(dbfile, "  field(VAL,  \"%s\")\n", property.value.sval.c_str());
         if (!property.addrspec.empty()) {
             fprintf(dbfile, "  field(INP,  \"@ipmi(%s)\")\n", property.addrspec.c_str());
+            fprintf(dbfile, "  field(DTYP, \"ipmi\")\n");
         }
         fprintf(dbfile, "}\n");
     }
@@ -196,9 +217,9 @@ void printScanReportFull(const std::string& conn_id, const std::vector<provider:
 
         for (auto& property: entity.properties) {
             if (property.addrspec.empty())
-                printf("%*s  * %s=%s\n",      indent, "", property.name.c_str(), property.sval.c_str());
+                printf("%*s  * %s=%s\n",      indent, "", property.name.c_str(), property.value.sval.c_str());
             else
-                printf("%*s  * %s=%s (%s)\n", indent, "", property.name.c_str(), property.sval.c_str(), property.addrspec.c_str());
+                printf("%*s  * %s=%s (%s)\n", indent, "", property.name.c_str(), property.value.sval.c_str(), property.addrspec.c_str());
         }
     }
 }

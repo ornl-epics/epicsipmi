@@ -38,10 +38,9 @@ class IpmiToolProvider : public provider::BaseProvider
                      const std::string& username, const std::string& password,
                      const std::string& protocol, int privlevel) override;
 
-        bool getValue(const std::string& addrspec, int& value) override;
-        bool getValue(const std::string& addrspec, double& value) override;
-        bool getValue(const std::string& addrspec, std::string& value) override;
         std::vector<EntityInfo> scan() override;
+
+        bool getValue(const std::string& addrspec, EntityInfo::Property::Value& value) override;
 
     private:
         std::vector<uint8_t> findIpmbs();
@@ -52,6 +51,9 @@ class IpmiToolProvider : public provider::BaseProvider
 
         std::string getDeviceAddr(::sdr_record_fru_locator& fru, const std::string& suffix="");
         std::string getSensorAddr(::sdr_record_common_sensor& sdr, const std::string& suffix="VAL");
+
+        bool getSensorValue(uint8_t owner_id, uint8_t lun, uint8_t sensor_num, const std::string& field, EntityInfo::Property::Value& value);
+        bool getDeviceProp(uint8_t device_id, const std::string& property, EntityInfo::Property::Value& value);
 
         // Low-level IPMI functions that ipmitool doesn't provide
         uint32_t getFruAreaOffset(uint8_t device_id, struct ::fru_info &fruinfo, uint8_t area);

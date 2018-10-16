@@ -10,10 +10,16 @@
 
 #pragma once
 
+#include <functional>
 #include <limits>
+#include <list>
 #include <memory>
 #include <string>
 #include <vector>
+
+#include <epicsEvent.h>
+#include <epicsMutex.h>
+#include <epicsThread.h>
 
 namespace epicsipmi {
 namespace provider {
@@ -33,17 +39,24 @@ struct EntityInfo {
     std::string description{""};    //!< Entity description as defined by IPMI system
 
     struct Property {
+        struct Value {
+            enum class Type {
+                IVAL,
+                DVAL,
+                SVAL,
+            } type = Type::IVAL;
+            int ival = 0;           //!< Integer value
+            double dval = 0.0;      //!< Floating point value
+            std::string sval = "";  //!< String value, must always be populated even when converting from ival or dval
+            Value& operator=(int v);
+            Value& operator=(double v);
+            Value& operator=(const std::string& v);
+            Value& operator=(const Value& v);
+        };
+
         std::string name{""};       //!< Property name (like VAL, HIGH, HIHI, Serial, etc.)
         std::string addrspec{""};   //!< IPMI address to access the value, may be empty if not addressable
-
-        enum class ValueType {
-            IVAL,
-            DVAL,
-            SVAL,
-        } valtype = ValueType::IVAL;
-        int ival;                   //!< Integer value
-        double dval;                //!< Floating point value
-        std::string sval;           //!< String value, must always be populated even when converting from ival or dval
+        Value value;
     };
     class Properties : public std::vector<Property> {
         public:
@@ -55,6 +68,8 @@ struct EntityInfo {
 //    std::vector<Property> properties;
 };
 
+typedef std::function<void(bool, EntityInfo::Property::Value&)> Callback;
+
 /**
  * @class BaseProvider
  * @brief An abstract provider class with pure-virtual handles.
@@ -62,11 +77,35 @@ struct EntityInfo {
  * One provider object is instantiated for each IPMI connection.
  * IPMI provider implementations must derive from this class.
  */
-class BaseProvider {
+class BaseProvider : private epicsThreadRunable {
+    private:
+        epicsMutex m_mutex;
+        epicsThread m_thread;
+        epicsEvent m_event;
+        std::list<std::pair<std::string,Callback>> m_tasks;
+        bool m_running = true;
     protected:
         std::string m_connid;
     public:
+        /**
+         * C'tor
+         */
         BaseProvider(const std::string& conn_id);
+
+        /**
+         * @brief Destructor stops the thread
+         */
+        ~BaseProvider();
+
+        /**
+         * @brief Thread main function
+         */
+        void run();
+
+        /**
+         * @brief Stop the thread.
+         */
+        void stop();
 
         /**
          * @brief Establishes connection with IPMI sub-system.
@@ -88,28 +127,12 @@ class BaseProvider {
         virtual std::vector<EntityInfo> scan() = 0;
 
         /**
-         * @brief Queries for integer value from a given IPMI address
+         * @brief Schedules retrieving new value
          * @param addrspec address to connect
-         * @param value returned value on success
+         * @param cb function to be called uppon completion (or failure)
          * @return true on success, false when no entity found or wrong type
          */
-        virtual bool getValue(const std::string& addrspec, int& value) { return false; }
-
-        /**
-         * @brief Queries for floating value from a given IPMI address
-         * @param addrspec address to connect
-         * @param value returned value on success
-         * @return true on success, false when no entity found or wrong type
-         */
-        virtual bool getValue(const std::string& addrspec, double& value) { return false; }
-
-        /**
-         * @brief Queries for string value from a given IPMI address
-         * @param addrspec address to connect
-         * @param value returned value on success
-         * @return true on success, false when no entity found or wrong type
-         */
-        virtual bool getValue(const std::string& addrspec, std::string& value) { return false; }
+        bool scheduleTask(const std::string& addrspec, const Callback& cb);
 
         /**
          * @brief Generates EPICS compatible for a given device.
@@ -132,6 +155,17 @@ class BaseProvider {
          * returns a name that can be used as EPICS PV id.
          */
         std::string getSensorName(uint8_t owner_id, uint8_t lun, uint8_t sensor_num, const std::string& suffix="");
+
+        /**
+         * @brief Retrieve a new value, take as much time as needed.
+         * @param addrspec IPMI entity address
+         * @param cb callback function to be called upon completion.
+         *
+         * This function is called from the working thread. Derived classes
+         * must implement the details of parsing addrspec and getting a new
+         * value from IPMI system.
+         */
+        virtual bool getValue(const std::string& addrspec, EntityInfo::Property::Value& value) = 0;
 };
 
 /**
@@ -156,6 +190,13 @@ bool connect(const std::string& connection_id, const std::string& hostname,
  * @return A list of entities
  */
 std::vector<EntityInfo> scan(const std::string& connection_id);
+
+/**
+ * @brief Schedule reading a new value.
+ * @param addrspec Address of the value to read.
+ * @param cb Function to be called uppon completion.
+ */
+bool scheduleTask(const std::string& addrspec, const Callback& cb);
 
 } // namespace provider
 } // namespace epicsipmi

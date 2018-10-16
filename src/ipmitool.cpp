@@ -31,6 +31,7 @@ int read_fru_area(struct ipmi_intf * intf, struct fru_info *fru, uint8_t id,
 #include <array>
 #include <cassert>
 #include <memory>
+#include <regex>
 
 namespace epicsipmi {
 namespace provider {
@@ -466,21 +467,6 @@ bool IpmiToolProvider::getFruProductProperties(::sdr_record_fru_locator& fru, En
     return true;
 }
 
-bool IpmiToolProvider::getValue(const std::string& addrspec, int& value)
-{
-    return false;
-}
-
-bool IpmiToolProvider::getValue(const std::string& addrspec, double& value)
-{
-    return false;
-}
-
-bool IpmiToolProvider::getValue(const std::string& addrspec, std::string& value)
-{
-    return false;
-}
-
 std::string IpmiToolProvider::getSensorAddr(::sdr_record_common_sensor& sdr, const std::string& suffix)
 {
     std::string addrspec = m_connid + " SENSOR ";
@@ -496,6 +482,132 @@ std::string IpmiToolProvider::getDeviceAddr(::sdr_record_fru_locator& fru, const
     std::string addrspec = m_connid + " DEVICE ";
     addrspec += std::to_string(fru.device_id) + " " + suffix;
     return addrspec;
+}
+
+bool IpmiToolProvider::getValue(const std::string& addrspec, EntityInfo::Property::Value& value)
+{
+    std::regex re("^[^ ]+ *([^ ]+) *(.*)$");
+    std::smatch m;
+    if (!std::regex_search(addrspec, m, re) || m.empty())
+        return false;
+
+    std::string addrrest = m[2];
+    if (m[1] == "SENSOR") {
+        static std::regex re_sdr("^([0-9]+):([0-9]+):([0-9]+) (.*)$");
+        if (std::regex_search(addrrest, m, re_sdr) && m.size() == 5) {
+            uint8_t owner_id   = std::stoul(m[1]);
+            uint8_t lun        = std::stoul(m[2]);
+            uint8_t sensor_num = std::stoul(m[3]);
+            return getSensorValue(owner_id, lun, sensor_num, m[4], value);
+        }
+    } else if (m[1] == "DEVICE") {
+        static std::regex re_fru("^([0-9]+) (.*)$");
+        if (std::regex_search(addrrest, m, re_fru) && m.size() == 3) {
+            uint8_t device_id = std::stoul(m[1]);
+            return getDeviceProp(device_id, m[2], value);
+        }
+    }
+    return false;
+}
+
+bool IpmiToolProvider::getSensorValue(uint8_t owner_id, uint8_t lun, uint8_t sensor_num, const std::string& field, EntityInfo::Property::Value& value)
+{
+    if (!m_intf)
+        return false;
+
+    uint8_t local_addr = m_intf->target_addr;
+    auto addresses = findIpmbs();
+    addresses.insert(addresses.begin(), local_addr);
+
+    for (auto &addr: addresses) {
+        m_intf->target_addr = addr;
+
+        std::unique_ptr<::ipmi_sdr_iterator, decltype(::free)*> it{::ipmi_sdr_start(m_intf, 0), ::free};
+        if (!it)
+            continue;
+
+        while (::sdr_get_rs* header = ::ipmi_sdr_get_next_header(m_intf, it.get())) {
+            uint8_t* const rec = ::ipmi_sdr_get_record(m_intf, header, it.get());
+            if (rec == nullptr)
+                continue;
+
+            if (header->type == SDR_RECORD_TYPE_FULL_SENSOR) {
+                auto sdr = reinterpret_cast<::sdr_record_full_sensor*>(rec);
+                if (sdr->cmn.keys.owner_id   == owner_id &&
+                    sdr->cmn.keys.lun        == lun &&
+                    sdr->cmn.keys.sensor_num == sensor_num) {
+
+                    auto sensor = extractSensorInfo(sdr);
+                    for (auto& property: sensor.properties) {
+                        if (property.name == field) {
+                            value = property.value;
+                            ::free(rec);
+                            return true;
+                        }
+                    }
+                }
+            } else if (header->type == SDR_RECORD_TYPE_COMPACT_SENSOR) {
+                auto sdr = reinterpret_cast<::sdr_record_compact_sensor*>(rec);
+                if (sdr->cmn.keys.owner_id   == owner_id &&
+                    sdr->cmn.keys.lun        == lun &&
+                    sdr->cmn.keys.sensor_num == sensor_num) {
+
+                    auto sensor = extractSensorInfo(sdr);
+                    for (auto& property: sensor.properties) {
+                        if (property.name == field) {
+                            value = property.value;
+                            ::free(rec);
+                            return true;
+                        }
+                    }
+                }
+            }
+            ::free(rec);
+        }
+    }
+
+    return false;
+}
+
+bool IpmiToolProvider::getDeviceProp(uint8_t device_id, const std::string& field, EntityInfo::Property::Value& value)
+{
+    if (!m_intf)
+        return false;
+
+    uint8_t local_addr = m_intf->target_addr;
+    auto addresses = findIpmbs();
+    addresses.insert(addresses.begin(), local_addr);
+
+    for (auto &addr: addresses) {
+        m_intf->target_addr = addr;
+
+        std::unique_ptr<::ipmi_sdr_iterator, decltype(::free)*> it{::ipmi_sdr_start(m_intf, 0), ::free};
+        if (!it)
+            continue;
+
+        while (::sdr_get_rs* header = ::ipmi_sdr_get_next_header(m_intf, it.get())) {
+            uint8_t* const rec = ::ipmi_sdr_get_record(m_intf, header, it.get());
+            if (rec == nullptr)
+                continue;
+
+            if (header->type == SDR_RECORD_TYPE_FRU_DEVICE_LOCATOR) {
+                auto fru = reinterpret_cast<::sdr_record_fru_locator*>(rec);
+                if (fru->device_id == device_id) {
+                    auto device = extractDeviceInfo(fru);
+                    for (auto& property: device.properties) {
+                        if (property.name == field) {
+                            value = property.value;
+                            ::free(rec);
+                            return true;
+                        }
+                    }
+                }
+            }
+            ::free(rec);
+        }
+    }
+
+    return false;
 }
 
 } // namespace provider

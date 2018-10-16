@@ -120,13 +120,60 @@ std::vector<EntityInfo> scan(const std::string& conn_id)
     return conn->scan();
 }
 
+bool scheduleTask(const std::string& addrspec, const Callback& cb)
+{
+    auto space = addrspec.find(' ');
+    if (space == std::string::npos)
+        return false;
+
+    auto conn = getConnection(addrspec.substr(0, space));
+    if (!conn)
+        return false;
+
+    return conn->scheduleTask(addrspec, cb);
+}
+
 // ***************************************************
 // ***** BaseProvider class functions            *****
 // ***************************************************
 
 BaseProvider::BaseProvider(const std::string& conn_id)
-: m_connid(conn_id)
-{}
+: m_thread(*this, conn_id.c_str(), epicsThreadGetStackSize(epicsThreadStackSmall), epicsThreadPriorityLow)
+, m_connid(conn_id)
+{
+    m_thread.start();
+}
+
+BaseProvider::~BaseProvider()
+{
+    stop();
+}
+
+void BaseProvider::run()
+{
+    while (m_running) {
+        m_event.wait();
+        m_mutex.lock();
+        if (m_tasks.empty()) {
+            m_mutex.unlock();
+            continue;
+        } else {
+            auto task = m_tasks.front();
+            m_tasks.pop_front();
+            m_mutex.unlock();
+
+            EntityInfo::Property::Value value;
+            bool success = getValue(task.first, value);
+            task.second(success, value);
+        }
+    }
+}
+
+void BaseProvider::stop()
+{
+    m_running = false;
+    m_event.signal();
+}
 
 std::string BaseProvider::getDeviceName(uint8_t device_id, const std::string& suffix)
 {
@@ -147,6 +194,15 @@ std::string BaseProvider::getSensorName(uint8_t owner_id, uint8_t lun, uint8_t s
     return name;
 }
 
+bool BaseProvider::scheduleTask(const std::string& addrspec, const Callback& cb)
+{
+    m_mutex.lock();
+    m_tasks.push_back(std::make_pair(addrspec, cb));
+    m_mutex.unlock();
+    m_event.signal();
+    return true;
+}
+
 // ***************************************************
 // ***** Entity class functions                  *****
 // ***************************************************
@@ -156,9 +212,7 @@ void EntityInfo::Properties::push_back(const std::string& name, int value, const
     Property property;
     property.name = name;
     property.addrspec = addrspec;
-    property.valtype = Property::ValueType::IVAL;
-    property.ival = value;
-    property.sval = std::to_string(value);
+    property.value = value;
     std::vector<Property>::push_back(property);
 }
 
@@ -167,9 +221,7 @@ void EntityInfo::Properties::push_back(const std::string& name, double value, co
     Property property;
     property.name = name;
     property.addrspec = addrspec;
-    property.valtype = Property::ValueType::DVAL;
-    property.dval = value;
-    property.sval = std::to_string(value);
+    property.value = value;
     std::vector<Property>::push_back(property);
 }
 
@@ -178,8 +230,7 @@ void EntityInfo::Properties::push_back(const std::string& name, const std::strin
     Property property;
     property.name = name;
     property.addrspec = addrspec;
-    property.valtype = Property::ValueType::SVAL;
-    property.sval = value;
+    property.value = value;
     std::vector<Property>::push_back(property);
 }
 
@@ -191,6 +242,38 @@ std::vector<EntityInfo::Property>::const_iterator EntityInfo::Properties::find(c
             break;
     }
     return it;
+}
+
+// ***************************************************
+// ***** Entity::Property::Value class functions *****
+// ***************************************************
+
+EntityInfo::Property::Value& EntityInfo::Property::Value::operator=(int v) {
+    type = Type::IVAL;
+    ival = v;
+    sval = std::to_string(v);
+    return *this;
+}
+
+EntityInfo::Property::Value& EntityInfo::Property::Value::operator=(double v) {
+    type = Type::DVAL;
+    dval = v;
+    sval = std::to_string(v);
+    return *this;
+}
+
+EntityInfo::Property::Value& EntityInfo::Property::Value::operator=(const std::string& v) {
+    type = Type::SVAL;
+    sval = v;
+    return *this;
+}
+
+EntityInfo::Property::Value& EntityInfo::Property::Value::operator=(const EntityInfo::Property::Value& v) {
+    type = v.type;
+    ival = v.ival;
+    dval = v.dval;
+    sval = v.sval;
+    return *this;
 }
 
 } // namespace provider

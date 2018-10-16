@@ -88,7 +88,7 @@ extern "C" void ipmiDumpDbCallFunc(const iocshArgBuf* args) {
     print::printDatabase(entities, args[1].sval);
 }
 
-static void ipmiRegistrar ()
+static void epicsipmiRegistrar ()
 {
     static bool initialized  = false;
     if (!initialized) {
@@ -100,7 +100,7 @@ static void ipmiRegistrar ()
 }
 
 extern "C" {
-    epicsExportRegistrar(ipmiRegistrar);
+    epicsExportRegistrar(epicsipmiRegistrar);
 }
 
 } // namespace shell
