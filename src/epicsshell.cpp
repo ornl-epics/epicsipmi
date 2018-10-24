@@ -62,8 +62,13 @@ extern "C" void ipmiScanCallFunc(const iocshArgBuf* args) {
         printf("Usage: ipmiScan <conn id> [verbose]\n");
         return;
     }
-    auto entities = provider::scan(args[0].sval);
+    auto conn = provider::getConnection(args[0].sval);
+    if (!conn) {
+        printf("ERROR: No such connection '%s'\n", args[0].sval);
+        return;
+    }
 
+    auto entities = conn->scan();
     if (args[1].sval && std::string(args[1].sval) == "verbose")
         print::printScanReportFull(args[0].sval, entities);
     else
@@ -84,8 +89,14 @@ extern "C" void ipmiDumpDbCallFunc(const iocshArgBuf* args) {
         printf("Usage: ipmiDumpDb <conn id> <output file>\n");
         return;
     }
-    auto entities = provider::scan(args[0].sval);
-    print::printDatabase(entities, args[1].sval);
+    auto conn = provider::getConnection(args[0].sval);
+    if (!conn) {
+        printf("ERROR: No such connection '%s'\n", args[0].sval);
+        return;
+    }
+
+    auto entities = conn->scan();
+    print::printDatabase(args[0].sval, entities, args[1].sval);
 }
 
 static void epicsipmiRegistrar ()

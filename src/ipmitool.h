@@ -32,28 +32,21 @@ class IpmiToolProvider : public provider::BaseProvider
         ::ipmi_intf* m_intf = nullptr;
 
     public:
-        IpmiToolProvider(const std::string& conn_id);
-
         bool connect(const std::string& hostname,
                      const std::string& username, const std::string& password,
                      const std::string& protocol, int privlevel) override;
 
         std::vector<EntityInfo> scan() override;
 
-        bool getValue(const std::string& addrspec, EntityInfo::Property::Value& value) override;
+        ReturnCode getSensor(const std::string& addrspec, double& val, double& low, double& lolo, double& high, double& hihi, int16_t& prec, double& hyst) override;
+        ReturnCode getFruProperties(const std::string& addrspec, EntityInfo::Properties& properties) override;
 
     private:
         std::vector<uint8_t> findIpmbs();
         EntityInfo extractSensorInfo(::sdr_record_full_sensor*    sdr);
         EntityInfo extractSensorInfo(::sdr_record_compact_sensor* sdr);
         EntityInfo extractSensorInfo(::sdr_record_common_sensor*  sdr);
-        EntityInfo extractDeviceInfo(::sdr_record_fru_locator* fru);
-
-        std::string getDeviceAddr(::sdr_record_fru_locator& fru, const std::string& suffix="");
-        std::string getSensorAddr(::sdr_record_common_sensor& sdr, const std::string& suffix="VAL");
-
-        bool getSensorValue(uint8_t owner_id, uint8_t lun, uint8_t sensor_num, const std::string& field, EntityInfo::Property::Value& value);
-        bool getDeviceProp(uint8_t device_id, const std::string& property, EntityInfo::Property::Value& value);
+        EntityInfo extractFruInfo(::sdr_record_fru_locator* fru);
 
         // Low-level IPMI functions that ipmitool doesn't provide
         uint32_t getFruAreaOffset(uint8_t device_id, struct ::fru_info &fruinfo, uint8_t area);

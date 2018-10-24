@@ -17,9 +17,9 @@
 namespace epicsipmi {
 namespace print {
 
-void printSensorRecords(FILE *dbfile, const provider::EntityInfo& entity)
+void printSensorRecords(const std::string& conn_id, FILE *dbfile, const provider::EntityInfo& entity)
 {
-    assert(entity.type == provider::EntityInfo::Type::SENSOR);
+    assert(entity.type == provider::EntityInfo::Type::ANALOG_SENSOR);
 
     auto valprop = entity.properties.find("VAL");
     if (valprop == entity.properties.end() ||
@@ -31,7 +31,7 @@ void printSensorRecords(FILE *dbfile, const provider::EntityInfo& entity)
     bool analog = (valprop->value.type != provider::EntityInfo::Property::Value::Type::IVAL);
 
     fprintf(dbfile, "record(%s, \"$(IPMI)%s\") {\n", (analog ? "ai" : "longin"), entity.name.c_str());
-    fprintf(dbfile, "  field(INP,  \"@ipmi(%s)\")\n", valprop->addrspec.c_str());
+    fprintf(dbfile, "  field(INP,  \"@ipmi(%s SENA %s)\")\n", conn_id.c_str(), entity.addrspec.c_str());
     fprintf(dbfile, "  field(DTYP, \"ipmi\")\n");
     fprintf(dbfile, "  field(DESC, \"%s\")\n", entity.description.substr(0, 40).c_str());
 
@@ -98,20 +98,20 @@ void printSensorRecords(FILE *dbfile, const provider::EntityInfo& entity)
     fprintf(dbfile, "}\n");
 
     for (auto& property: entity.properties) {
-        if (property.addrspec.empty() || property.name == "VAL")
+        if (property.name == "VAL" || property.writable == false)
             continue;
 
         fprintf(dbfile, "record(%s, \"$(IPMI)%s:%s\") {\n", (analog ? "ao" : "longout"), entity.name.c_str(), property.name.c_str());
-        fprintf(dbfile, "  field(OUT,  \"@ipmi(%s)\")\n", property.addrspec.c_str());
+        fprintf(dbfile, "  field(OUT,  \"@ipmi(%s SENA %s %s)\")\n", conn_id.c_str(), entity.addrspec.c_str(), property.name.c_str());
         fprintf(dbfile, "  field(DTYP, \"ipmi\")\n");
-        fprintf(dbfile, "  field(FLNK, \"$(IPMI)%s\")\n", property.addrspec.c_str());
+        fprintf(dbfile, "  field(FLNK, \"$(IPMI)%s\")\n", entity.addrspec.c_str());
         fprintf(dbfile, "}\n");
     }
 }
 
-void printDeviceRecords(FILE *dbfile, const provider::EntityInfo& entity)
+void printFruRecords(const std::string& conn_id, FILE *dbfile, const provider::EntityInfo& entity)
 {
-    assert(entity.type == provider::EntityInfo::Type::DEVICE);
+    assert(entity.type == provider::EntityInfo::Type::FRU);
 
     fprintf(dbfile, "record(stringin, \"$(IPMI)%s\") {\n", entity.name.c_str());
     fprintf(dbfile, "  field(DESC, \"%s\")\n", entity.description.substr(0, 40).c_str());
@@ -120,10 +120,8 @@ void printDeviceRecords(FILE *dbfile, const provider::EntityInfo& entity)
     for (auto& property: entity.properties) {
         fprintf(dbfile, "record(stringin, \"$(IPMI)%s:%s\") {\n", entity.name.c_str(), property.name.c_str());
         fprintf(dbfile, "  field(VAL,  \"%s\")\n", property.value.sval.c_str());
-        if (!property.addrspec.empty()) {
-            fprintf(dbfile, "  field(INP,  \"@ipmi(%s)\")\n", property.addrspec.c_str());
-            fprintf(dbfile, "  field(DTYP, \"ipmi\")\n");
-        }
+        fprintf(dbfile, "  field(INP,  \"@ipmi(%s FRU %s %s)\")\n", conn_id.c_str(), entity.addrspec.c_str(), property.name.c_str());
+        fprintf(dbfile, "  field(DTYP, \"ipmi\")\n");
         fprintf(dbfile, "}\n");
     }
 }
@@ -156,7 +154,7 @@ void printMenuRecord(FILE *db, const std::string& conn_id, bool output,
 }
 */
 
-void printDatabase(const std::vector<provider::EntityInfo>& entities, const std::string& path)
+void printDatabase(const std::string& conn_id, const std::vector<provider::EntityInfo>& entities, const std::string& path)
 {
     FILE *dbfile = fopen(path.c_str(), "w");
     if (dbfile == nullptr) {
@@ -165,10 +163,10 @@ void printDatabase(const std::vector<provider::EntityInfo>& entities, const std:
     }
 
     for (auto& entity: entities) {
-        if (entity.type == provider::EntityInfo::Type::SENSOR) {
-            printSensorRecords(dbfile, entity);
-        } else if (entity.type == provider::EntityInfo::Type::DEVICE) {
-            printDeviceRecords(dbfile, entity);
+        if (entity.type == provider::EntityInfo::Type::ANALOG_SENSOR) {
+            printSensorRecords(conn_id, dbfile, entity);
+        } else if (entity.type == provider::EntityInfo::Type::FRU) {
+            printFruRecords(conn_id, dbfile, entity);
         }
     }
 
@@ -187,10 +185,10 @@ void printScanReportBrief(const std::string& conn_id, const std::vector<provider
     size_t i = 0;
     for (auto& entity: entities) {
         const char *type = "UNKNOWN";
-        if (entities[i].type == provider::EntityInfo::Type::SENSOR) {
+        if (entities[i].type == provider::EntityInfo::Type::ANALOG_SENSOR) {
             type = "SENSOR";
-        } else if (entities[i].type == provider::EntityInfo::Type::DEVICE) {
-            type = "DEVICE";
+        } else if (entities[i].type == provider::EntityInfo::Type::FRU) {
+            type = "FRU";
         }
         printf("%*zu: %s %s\n", indent, ++i, type, entity.description.c_str());
     }
@@ -208,18 +206,15 @@ void printScanReportFull(const std::string& conn_id, const std::vector<provider:
     size_t i = 0;
     for (auto& entity: entities) {
         const char *type = "UNKNOWN";
-        if (entities[i].type == provider::EntityInfo::Type::SENSOR) {
+        if (entities[i].type == provider::EntityInfo::Type::ANALOG_SENSOR) {
             type = "SENSOR";
-        } else if (entities[i].type == provider::EntityInfo::Type::DEVICE) {
-            type = "DEVICE";
+        } else if (entities[i].type == provider::EntityInfo::Type::FRU) {
+            type = "FRU";
         }
-        printf("%*zu: %s (%s)\n", indent, ++i, entity.description.c_str(), type);
+        printf("%*zu: %s (%s %s)\n", indent, ++i, entity.description.c_str(), type, entity.addrspec.c_str());
 
         for (auto& property: entity.properties) {
-            if (property.addrspec.empty())
-                printf("%*s  * %s=%s\n",      indent, "", property.name.c_str(), property.value.sval.c_str());
-            else
-                printf("%*s  * %s=%s (%s)\n", indent, "", property.name.c_str(), property.value.sval.c_str(), property.addrspec.c_str());
+            printf("%*s  * %s=%s\n",      indent, "", property.name.c_str(), property.value.sval.c_str());
         }
     }
 }

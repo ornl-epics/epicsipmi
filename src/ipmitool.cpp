@@ -36,10 +36,6 @@ int read_fru_area(struct ipmi_intf * intf, struct fru_info *fru, uint8_t id,
 namespace epicsipmi {
 namespace provider {
 
-IpmiToolProvider::IpmiToolProvider(const std::string& conn_id)
-: BaseProvider(conn_id)
-{}
-
 bool IpmiToolProvider::connect(const std::string& hostname,
                                const std::string& username, const std::string& password,
                                const std::string& protocol, int privlevel)
@@ -117,7 +113,7 @@ std::vector<EntityInfo> IpmiToolProvider::scan()
                     //slaves_.insert(reinterpret_cast< ::sdr_record_mc_locator*>(rec)->dev_slave_addr);
                     break;
                 case SDR_RECORD_TYPE_FRU_DEVICE_LOCATOR:
-                    entities.emplace_back( extractDeviceInfo(reinterpret_cast<::sdr_record_fru_locator*>(rec)) );
+                    entities.emplace_back( extractFruInfo(reinterpret_cast<::sdr_record_fru_locator*>(rec)) );
                     break;
                 default:
                     //SuS_LOG_STREAM(finest, log_id(), "ignoring sensor type 0x" << std::hex << +header->type << ".");
@@ -143,13 +139,14 @@ EntityInfo IpmiToolProvider::extractSensorInfo(::sdr_record_full_sensor* sdr)
 
     size_t idlen = std::min(sizeof(sdr->id_string), (size_t)(sdr->id_code & 0x1f));
     entity.description.assign((const char *)sdr->id_string, idlen);
+    entity.addrspec = std::to_string(sdr->cmn.keys.owner_id) + ":" + std::to_string(sdr->cmn.keys.lun) + ":" + std::to_string(sdr->cmn.keys.sensor_num);
 
     double value = 0.0;
     auto *sr = ::ipmi_sdr_read_sensor_value(m_intf, &sdr->cmn, SDR_RECORD_TYPE_FULL_SENSOR, 3);
     if (sr && sr->s_reading_valid && sr->s_has_analog_value)
         value = sr->s_a_val;
 
-    entity.properties.push_back("VAL", value, getSensorAddr(sdr->cmn, "VAL"));
+    entity.properties.push_back("VAL", value);
 
     // swap for 1/x conversions, cf. section 36.5 of IPMI specification
     bool swap_hi_lo = (sdr->linearization == SDR_SENSOR_L_1_X);
@@ -166,19 +163,19 @@ EntityInfo IpmiToolProvider::extractSensorInfo(::sdr_record_full_sensor* sdr)
     // Limits
     if (sdr->cmn.mask.type.threshold.read.ucr) {
         double ucr = ::sdr_convert_sensor_reading(sdr, sdr->threshold.upper.critical);
-        entity.properties.push_back(swap_hi_lo ? "LOLO" : "HIHI", ucr, getSensorAddr(sdr->cmn, "UCR"));
+        entity.properties.push_back(swap_hi_lo ? "LOLO" : "HIHI", ucr);
     }
     if (sdr->cmn.mask.type.threshold.read.lcr) {
         double lcr = ::sdr_convert_sensor_reading(sdr, sdr->threshold.lower.critical);
-        entity.properties.push_back(swap_hi_lo ? "HIHI" : "LOLO", lcr, getSensorAddr(sdr->cmn, "LCR"));
+        entity.properties.push_back(swap_hi_lo ? "HIHI" : "LOLO", lcr);
     }
     if (sdr->cmn.mask.type.threshold.read.unc) {
         double unc = ::sdr_convert_sensor_reading(sdr, sdr->threshold.upper.non_critical);
-        entity.properties.push_back(swap_hi_lo ? "LOW" : "HIGH", unc, getSensorAddr(sdr->cmn, "UNC"));
+        entity.properties.push_back(swap_hi_lo ? "LOW" : "HIGH", unc);
     }
     if (sdr->cmn.mask.type.threshold.read.lnc) {
         double lnc = ::sdr_convert_sensor_reading(sdr, sdr->threshold.lower.non_critical);
-        entity.properties.push_back(swap_hi_lo ? "HIGH" : "LOW", lnc, getSensorAddr(sdr->cmn, "LNC"));
+        entity.properties.push_back(swap_hi_lo ? "HIGH" : "LOW", lnc);
     }
 
     // Hysteresis is given in raw values
@@ -217,14 +214,14 @@ EntityInfo IpmiToolProvider::extractSensorInfo(::sdr_record_compact_sensor* sdr)
         if (sr && sr->s_reading_valid && !sr->s_has_analog_value)
             value = sr->s_reading;
 
-        entity.properties.push_back("VAL", value, getSensorAddr(sdr->cmn, "VAL"));
+        entity.properties.push_back("VAL", value);
     } else {
         double value = 0.0;
         auto *sr = ::ipmi_sdr_read_sensor_value(m_intf, &sdr->cmn, SDR_RECORD_TYPE_COMPACT_SENSOR, 3);
         if (sr && sr->s_reading_valid && sr->s_has_analog_value)
             value = sr->s_a_val;
 
-        entity.properties.push_back("VAL", value, getSensorAddr(sdr->cmn, "VAL"));
+        entity.properties.push_back("VAL", value);
 
         if (sdr->threshold.hysteresis.positive != 0x0 && sdr->threshold.hysteresis.positive != 0xFF) {
             entity.properties.push_back("HYST", sdr->threshold.hysteresis.positive);
@@ -239,8 +236,8 @@ EntityInfo IpmiToolProvider::extractSensorInfo(::sdr_record_compact_sensor* sdr)
 EntityInfo IpmiToolProvider::extractSensorInfo(::sdr_record_common_sensor* sdr)
 {
     EntityInfo entity;
-    entity.type = EntityInfo::Type::SENSOR;
-    entity.name = getSensorName(sdr->keys.owner_id, sdr->keys.lun, sdr->keys.sensor_num);
+    entity.type = EntityInfo::Type::ANALOG_SENSOR;
+    entity.name = "Sensor" + std::to_string((sdr->keys.lun << 8) | sdr->keys.sensor_num);
 
 /*
     // Build a menu
@@ -265,11 +262,12 @@ EntityInfo IpmiToolProvider::extractSensorInfo(::sdr_record_common_sensor* sdr)
     return entity;
 }
 
-EntityInfo IpmiToolProvider::extractDeviceInfo(::sdr_record_fru_locator* fru)
+EntityInfo IpmiToolProvider::extractFruInfo(::sdr_record_fru_locator* fru)
 {
     EntityInfo entity;
-    entity.type = EntityInfo::Type::DEVICE;
-    entity.name = getDeviceName(fru->device_id);
+    entity.type = EntityInfo::Type::FRU;
+    entity.name = "Fru" + std::to_string(fru->device_id);
+    entity.addrspec = std::to_string(fru->device_id);
 
     size_t idlen = std::min(sizeof(fru->id_string), (size_t)(fru->id_code & 0x1f));
     entity.description.assign((const char *)fru->id_string, idlen);
@@ -343,16 +341,16 @@ bool IpmiToolProvider::getFruChassisProperties(::sdr_record_fru_locator& fru, En
         return false;
 
     auto chassis_type = ::chassis_type_desc[ (buffer[2] > ARRAY_SIZE(::chassis_type_desc) - 1 ? 2 : buffer[2]) ];
-    properties.push_back("Chassis:Type", chassis_type, getDeviceAddr(fru, "Chassis:Type"));
+    properties.push_back("Chassis:Type", chassis_type);
 
     uint32_t i = 3;
     auto chassis_part = std::unique_ptr<char>(::get_fru_area_str(buffer.data(), &i));
     if (chassis_part && strlen(chassis_part.get()))
-        properties.push_back("Chassis:Part", chassis_part.get(), getDeviceAddr(fru, "Chassis:Part"));
+        properties.push_back("Chassis:Part", chassis_part.get());
 
     auto chassis_serial = std::unique_ptr<char>(::get_fru_area_str(buffer.data(), &i));
     if (chassis_serial && strlen(chassis_serial.get()))
-        properties.push_back("Chassis:Serial", chassis_serial.get(), getDeviceAddr(fru, "Chassis:Serial"));
+        properties.push_back("Chassis:Serial", chassis_serial.get());
 
     return true;
 }
@@ -385,28 +383,28 @@ bool IpmiToolProvider::getFruBoardProperties(::sdr_record_fru_locator& fru, Enti
     time_t tval = 60 * ((buffer[i+2] << 16) + (buffer[i+1] << 8) + (buffer[i])) + ::secs_from_1970_1996;
     std::string board_date( ctime(&tval) );
     board_date.pop_back(); // remove \n
-    properties.push_back("Board:Date", board_date, getDeviceAddr(fru, "Board:Date"));
+    properties.push_back("Board:Date", board_date);
 
     i += 3;
     auto board_manuf = std::unique_ptr<char>(::get_fru_area_str(buffer.data(), &i));
     if (board_manuf && strlen(board_manuf.get()))
-        properties.push_back("Board:Manuf", board_manuf.get(), getDeviceAddr(fru, "Board:Manuf"));
+        properties.push_back("Board:Manuf", board_manuf.get());
 
     auto board_product = std::unique_ptr<char>(::get_fru_area_str(buffer.data(), &i));
     if (board_product && strlen(board_product.get()))
-        properties.push_back("Board:Product", board_product.get(), getDeviceAddr(fru, "Board:Product"));
+        properties.push_back("Board:Product", board_product.get());
 
     auto board_serial = std::unique_ptr<char>(::get_fru_area_str(buffer.data(), &i));
     if (board_serial && strlen(board_serial.get()))
-        properties.push_back("Board:Serial", board_serial.get(), getDeviceAddr(fru, "Board:Serial"));
+        properties.push_back("Board:Serial", board_serial.get());
 
     auto board_part = std::unique_ptr<char>(::get_fru_area_str(buffer.data(), &i));
     if (board_part && strlen(board_part.get()))
-        properties.push_back("Board:Part", board_part.get(), getDeviceAddr(fru, "Board:Part"));
+        properties.push_back("Board:Part", board_part.get());
 
     auto board_fruid = std::unique_ptr<char>(::get_fru_area_str(buffer.data(), &i));
     if (board_fruid && strlen(board_fruid.get()))
-        properties.push_back("Board:FruID", board_fruid.get(), getDeviceAddr(fru, "Board:FruID"));
+        properties.push_back("Board:FruID", board_fruid.get());
 
     return true;
 }
@@ -438,82 +436,48 @@ bool IpmiToolProvider::getFruProductProperties(::sdr_record_fru_locator& fru, En
 
     auto product_manuf = std::unique_ptr<char>(::get_fru_area_str(buffer.data(), &i));
     if (product_manuf && strlen(product_manuf.get()))
-        properties.push_back("Product:Manuf", product_manuf.get(), getDeviceAddr(fru, "Product:Manuf"));
+        properties.push_back("Product:Manuf", product_manuf.get());
 
     auto product_name = std::unique_ptr<char>(::get_fru_area_str(buffer.data(), &i));
     if (product_name && strlen(product_name.get()))
-        properties.push_back("Product:Name", product_name.get(), getDeviceAddr(fru, "Product:Name"));
+        properties.push_back("Product:Name", product_name.get());
 
     auto product_part = std::unique_ptr<char>(::get_fru_area_str(buffer.data(), &i));
     if (product_part && strlen(product_part.get()))
-        properties.push_back("Product:Part", product_part.get(), getDeviceAddr(fru, "Product:Part"));
+        properties.push_back("Product:Part", product_part.get());
 
     auto product_ver = std::unique_ptr<char>(::get_fru_area_str(buffer.data(), &i));
     if (product_ver && strlen(product_ver.get()))
-        properties.push_back("Product:Version", product_ver.get(), getDeviceAddr(fru, "Product:Version"));
+        properties.push_back("Product:Version", product_ver.get());
 
     auto product_serial = std::unique_ptr<char>(::get_fru_area_str(buffer.data(), &i));
     if (product_serial && strlen(product_serial.get()))
-        properties.push_back("Product:Serial", product_serial.get(), getDeviceAddr(fru, "Product:Serial"));
+        properties.push_back("Product:Serial", product_serial.get());
 
     auto product_asset = std::unique_ptr<char>(::get_fru_area_str(buffer.data(), &i));
     if (product_asset && strlen(product_asset.get()))
-        properties.push_back("Product:Asset", product_asset.get(), getDeviceAddr(fru, "Product:Asset"));
+        properties.push_back("Product:Asset", product_asset.get());
 
     auto product_fruid = std::unique_ptr<char>(::get_fru_area_str(buffer.data(), &i));
     if (product_fruid && strlen(product_fruid.get()))
-        properties.push_back("Product:FruID", product_fruid.get(), getDeviceAddr(fru, "Product:FruID"));
+        properties.push_back("Product:FruID", product_fruid.get());
 
     return true;
 }
 
-std::string IpmiToolProvider::getSensorAddr(::sdr_record_common_sensor& sdr, const std::string& suffix)
+BaseProvider::ReturnCode IpmiToolProvider::getSensor(const std::string& addrspec, double& val, double& low, double& lolo, double& high, double& hihi, int16_t& prec, double& hyst)
 {
-    std::string addrspec = m_connid + " SENSOR ";
-    addrspec += std::to_string(sdr.keys.owner_id) + ":";
-    addrspec += std::to_string(sdr.keys.lun) + ":";
-    addrspec += std::to_string(sdr.keys.sensor_num) + " ";
-    addrspec += suffix;
-    return addrspec;
-}
-
-std::string IpmiToolProvider::getDeviceAddr(::sdr_record_fru_locator& fru, const std::string& suffix)
-{
-    std::string addrspec = m_connid + " DEVICE ";
-    addrspec += std::to_string(fru.device_id) + " " + suffix;
-    return addrspec;
-}
-
-bool IpmiToolProvider::getValue(const std::string& addrspec, EntityInfo::Property::Value& value)
-{
-    std::regex re("^[^ ]+ *([^ ]+) *(.*)$");
+    static std::regex re("^([0-9]+):([0-9]+):([0-9]+)$");
     std::smatch m;
     if (!std::regex_search(addrspec, m, re) || m.empty())
-        return false;
+        return BAD_ADDRESS;
 
-    std::string addrrest = m[2];
-    if (m[1] == "SENSOR") {
-        static std::regex re_sdr("^([0-9]+):([0-9]+):([0-9]+) (.*)$");
-        if (std::regex_search(addrrest, m, re_sdr) && m.size() == 5) {
-            uint8_t owner_id   = std::stoul(m[1]);
-            uint8_t lun        = std::stoul(m[2]);
-            uint8_t sensor_num = std::stoul(m[3]);
-            return getSensorValue(owner_id, lun, sensor_num, m[4], value);
-        }
-    } else if (m[1] == "DEVICE") {
-        static std::regex re_fru("^([0-9]+) (.*)$");
-        if (std::regex_search(addrrest, m, re_fru) && m.size() == 3) {
-            uint8_t device_id = std::stoul(m[1]);
-            return getDeviceProp(device_id, m[2], value);
-        }
-    }
-    return false;
-}
+    uint8_t owner_id = std::stoul(m[1]);
+    uint8_t lun = std::stoul(m[2]);
+    uint8_t sensor_num = std::stoul(m[3]);
 
-bool IpmiToolProvider::getSensorValue(uint8_t owner_id, uint8_t lun, uint8_t sensor_num, const std::string& field, EntityInfo::Property::Value& value)
-{
     if (!m_intf)
-        return false;
+        return NOT_CONNECTED;
 
     uint8_t local_addr = m_intf->target_addr;
     auto addresses = findIpmbs();
@@ -538,41 +502,37 @@ bool IpmiToolProvider::getSensorValue(uint8_t owner_id, uint8_t lun, uint8_t sen
                     sdr->cmn.keys.sensor_num == sensor_num) {
 
                     auto sensor = extractSensorInfo(sdr);
-                    for (auto& property: sensor.properties) {
-                        if (property.name == field) {
-                            value = property.value;
-                            ::free(rec);
-                            return true;
-                        }
-                    }
-                }
-            } else if (header->type == SDR_RECORD_TYPE_COMPACT_SENSOR) {
-                auto sdr = reinterpret_cast<::sdr_record_compact_sensor*>(rec);
-                if (sdr->cmn.keys.owner_id   == owner_id &&
-                    sdr->cmn.keys.lun        == lun &&
-                    sdr->cmn.keys.sensor_num == sensor_num) {
+                    ::free(rec);
 
-                    auto sensor = extractSensorInfo(sdr);
-                    for (auto& property: sensor.properties) {
-                        if (property.name == field) {
-                            value = property.value;
-                            ::free(rec);
-                            return true;
-                        }
-                    }
+                    val  = sensor.properties.find("VAL")->value.dval;
+                    low  = sensor.properties.find("LOW")->value.dval;
+                    lolo = sensor.properties.find("LOLO")->value.dval;
+                    high = sensor.properties.find("HIGH")->value.dval;
+                    hihi = sensor.properties.find("HIHI")->value.dval;
+                    hyst = sensor.properties.find("HYST")->value.dval;
+                    return SUCCESS;
                 }
             }
             ::free(rec);
         }
     }
 
-    return false;
+    return NOT_FOUND;
 }
 
-bool IpmiToolProvider::getDeviceProp(uint8_t device_id, const std::string& field, EntityInfo::Property::Value& value)
+BaseProvider::ReturnCode IpmiToolProvider::getFruProperties(const std::string& addrspec, EntityInfo::Properties& properties)
 {
+    properties.clear();
+
+    static std::regex re("^([0-9]+)$");
+    std::smatch m;
+    if (!std::regex_search(addrspec, m, re) || m.empty())
+        return BAD_ADDRESS;
+
+    unsigned device_id = std::stoul(m[1]);
+
     if (!m_intf)
-        return false;
+        return NOT_CONNECTED;
 
     uint8_t local_addr = m_intf->target_addr;
     auto addresses = findIpmbs();
@@ -593,21 +553,16 @@ bool IpmiToolProvider::getDeviceProp(uint8_t device_id, const std::string& field
             if (header->type == SDR_RECORD_TYPE_FRU_DEVICE_LOCATOR) {
                 auto fru = reinterpret_cast<::sdr_record_fru_locator*>(rec);
                 if (fru->device_id == device_id) {
-                    auto device = extractDeviceInfo(fru);
-                    for (auto& property: device.properties) {
-                        if (property.name == field) {
-                            value = property.value;
-                            ::free(rec);
-                            return true;
-                        }
-                    }
+                    properties = extractFruInfo(fru).properties;
+                    ::free(rec);
+                    return SUCCESS;
                 }
             }
             ::free(rec);
         }
     }
 
-    return false;
+    return NOT_FOUND;
 }
 
 } // namespace provider

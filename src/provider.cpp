@@ -24,13 +24,6 @@ namespace provider {
 // ***** Forward declaration of static functions *****
 // ***************************************************
 
-/**
- * @brief Returns a pointer to existing connection.
- * @param connection_id unique connection id
- * @return Smart pointer or empty.
- */
-static std::shared_ptr<BaseProvider> getConnection(const std::string& conn_id);
-
 // ***************************************************
 // ***** Private definitions                     *****
 // ***************************************************
@@ -74,7 +67,7 @@ bool connect(const std::string& conn_id, const std::string& hostname,
     do {
 #ifdef HAVE_IPMITOOL
         try {
-            conn.reset(new IpmiToolProvider(conn_id));
+            conn.reset(new IpmiToolProvider);
         } catch (std::bad_alloc& e) {
             // TODO: LOG
         }
@@ -111,125 +104,30 @@ std::shared_ptr<BaseProvider> getConnection(const std::string& conn_id)
     return conn;
 }
 
-std::vector<EntityInfo> scan(const std::string& conn_id)
-{
-    auto conn = getConnection(conn_id);
-    if (!conn)
-        return std::vector<EntityInfo>();
-
-    return conn->scan();
-}
-
-bool scheduleTask(const std::string& addrspec, const Callback& cb)
-{
-    auto space = addrspec.find(' ');
-    if (space == std::string::npos)
-        return false;
-
-    auto conn = getConnection(addrspec.substr(0, space));
-    if (!conn)
-        return false;
-
-    return conn->scheduleTask(addrspec, cb);
-}
-
-// ***************************************************
-// ***** BaseProvider class functions            *****
-// ***************************************************
-
-BaseProvider::BaseProvider(const std::string& conn_id)
-: m_thread(*this, conn_id.c_str(), epicsThreadGetStackSize(epicsThreadStackSmall), epicsThreadPriorityLow)
-, m_connid(conn_id)
-{
-    m_thread.start();
-}
-
-BaseProvider::~BaseProvider()
-{
-    stop();
-}
-
-void BaseProvider::run()
-{
-    while (m_running) {
-        m_event.wait();
-        m_mutex.lock();
-        if (m_tasks.empty()) {
-            m_mutex.unlock();
-            continue;
-        } else {
-            auto task = m_tasks.front();
-            m_tasks.pop_front();
-            m_mutex.unlock();
-
-            EntityInfo::Property::Value value;
-            bool success = getValue(task.first, value);
-            task.second(success, value);
-        }
-    }
-}
-
-void BaseProvider::stop()
-{
-    m_running = false;
-    m_event.signal();
-}
-
-std::string BaseProvider::getDeviceName(uint8_t device_id, const std::string& suffix)
-{
-    std::string name = m_connid + ":" + "Dev" + std::to_string(device_id);
-    if (!suffix.empty())
-        name += ":" + suffix;
-    return name;
-}
-
-std::string BaseProvider::getSensorName(uint8_t owner_id, uint8_t lun, uint8_t sensor_num, const std::string& suffix)
-{
-    uint16_t sensor_id = ((lun & 0x3) << 8) | sensor_num;
-    std::string name = m_connid + ":";
-    name += "Dev" + std::to_string(owner_id) + ":";
-    name += "Sen" + std::to_string(sensor_id);
-    if (!suffix.empty())
-        name += ":" + suffix;
-    return name;
-}
-
-bool BaseProvider::scheduleTask(const std::string& addrspec, const Callback& cb)
-{
-    m_mutex.lock();
-    m_tasks.push_back(std::make_pair(addrspec, cb));
-    m_mutex.unlock();
-    m_event.signal();
-    return true;
-}
-
 // ***************************************************
 // ***** Entity class functions                  *****
 // ***************************************************
 
-void EntityInfo::Properties::push_back(const std::string& name, int value, const std::string& addrspec)
+void EntityInfo::Properties::push_back(const std::string& name, int value)
 {
     Property property;
     property.name = name;
-    property.addrspec = addrspec;
     property.value = value;
     std::vector<Property>::push_back(property);
 }
 
-void EntityInfo::Properties::push_back(const std::string& name, double value, const std::string& addrspec)
+void EntityInfo::Properties::push_back(const std::string& name, double value)
 {
     Property property;
     property.name = name;
-    property.addrspec = addrspec;
     property.value = value;
     std::vector<Property>::push_back(property);
 }
 
-void EntityInfo::Properties::push_back(const std::string& name, const std::string& value, const std::string& addrspec)
+void EntityInfo::Properties::push_back(const std::string& name, const std::string& value)
 {
     Property property;
     property.name = name;
-    property.addrspec = addrspec;
     property.value = value;
     std::vector<Property>::push_back(property);
 }

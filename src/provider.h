@@ -17,10 +17,6 @@
 #include <string>
 #include <vector>
 
-#include <epicsEvent.h>
-#include <epicsMutex.h>
-#include <epicsThread.h>
-
 namespace epicsipmi {
 namespace provider {
 
@@ -31,12 +27,13 @@ namespace provider {
 struct EntityInfo {
     enum class Type {
         NONE = 0,
-        SENSOR,
-        DEVICE,
+        ANALOG_SENSOR,
+        FRU,
     } type = Type::NONE;
 
     std::string name{""};           //!< Unique entity name based on id
     std::string description{""};    //!< Entity description as defined by IPMI system
+    std::string addrspec{""};       //!< Address used to communicate with this entity
 
     struct Property {
         struct Value {
@@ -55,14 +52,14 @@ struct EntityInfo {
         };
 
         std::string name{""};       //!< Property name (like VAL, HIGH, HIHI, Serial, etc.)
-        std::string addrspec{""};   //!< IPMI address to access the value, may be empty if not addressable
         Value value;
+        bool writable{false};
     };
     class Properties : public std::vector<Property> {
         public:
-            void push_back(const std::string& name, int value, const std::string& addrspec="");
-            void push_back(const std::string& name, double value, const std::string& addrspec="");
-            void push_back(const std::string& name, const std::string& value, const std::string& addrspec="");
+            void push_back(const std::string& name, int value);
+            void push_back(const std::string& name, double value);
+            void push_back(const std::string& name, const std::string& value);
             std::vector<Property>::const_iterator find(const std::string& name) const;
     } properties;
 //    std::vector<Property> properties;
@@ -77,35 +74,14 @@ typedef std::function<void(bool, EntityInfo::Property::Value&)> Callback;
  * One provider object is instantiated for each IPMI connection.
  * IPMI provider implementations must derive from this class.
  */
-class BaseProvider : private epicsThreadRunable {
-    private:
-        epicsMutex m_mutex;
-        epicsThread m_thread;
-        epicsEvent m_event;
-        std::list<std::pair<std::string,Callback>> m_tasks;
-        bool m_running = true;
-    protected:
-        std::string m_connid;
+class BaseProvider {
     public:
-        /**
-         * C'tor
-         */
-        BaseProvider(const std::string& conn_id);
-
-        /**
-         * @brief Destructor stops the thread
-         */
-        ~BaseProvider();
-
-        /**
-         * @brief Thread main function
-         */
-        void run();
-
-        /**
-         * @brief Stop the thread.
-         */
-        void stop();
+        enum ReturnCode {
+            SUCCESS,
+            NOT_FOUND,
+            NOT_CONNECTED,
+            BAD_ADDRESS,
+        };
 
         /**
          * @brief Establishes connection with IPMI sub-system.
@@ -126,46 +102,9 @@ class BaseProvider : private epicsThreadRunable {
          */
         virtual std::vector<EntityInfo> scan() = 0;
 
-        /**
-         * @brief Schedules retrieving new value
-         * @param addrspec address to connect
-         * @param cb function to be called uppon completion (or failure)
-         * @return true on success, false when no entity found or wrong type
-         */
-        bool scheduleTask(const std::string& addrspec, const Callback& cb);
+        virtual ReturnCode getSensor(const std::string& addrspec, double& val, double& low, double& lolo, double& high, double& hihi, int16_t& prec, double& hyst) { return NOT_FOUND; };
 
-        /**
-         * @brief Generates EPICS compatible for a given device.
-         * @note Uniqueness is not guaranteed.
-         * @param device_id Device ID that is supposed to be unique for a given connection.
-         *
-         * EPICS names are strings up to 63 characters long. They're usually
-         * composed of entity ids separated by : character. This function
-         * returns a name that can be used as EPICS PV id.
-         */
-        std::string getDeviceName(uint8_t device_id, const std::string& suffix="");
-
-        /**
-         * @brief Generates EPICS compatible for a given sensor.
-         * @note Uniqueness is not guaranteed.
-         * @param owner_id Owner device ID.
-         *
-         * EPICS names are strings up to 63 characters long. They're usually
-         * composed of entity ids separated by : character. This function
-         * returns a name that can be used as EPICS PV id.
-         */
-        std::string getSensorName(uint8_t owner_id, uint8_t lun, uint8_t sensor_num, const std::string& suffix="");
-
-        /**
-         * @brief Retrieve a new value, take as much time as needed.
-         * @param addrspec IPMI entity address
-         * @param cb callback function to be called upon completion.
-         *
-         * This function is called from the working thread. Derived classes
-         * must implement the details of parsing addrspec and getting a new
-         * value from IPMI system.
-         */
-        virtual bool getValue(const std::string& addrspec, EntityInfo::Property::Value& value) = 0;
+        virtual ReturnCode getFruProperties(const std::string& addrspec, EntityInfo::Properties& properties) { return NOT_FOUND; };
 };
 
 /**
@@ -185,18 +124,11 @@ bool connect(const std::string& connection_id, const std::string& hostname,
              const std::string& protocol, int privlevel);
 
 /**
- * @brief Return a list of all entities currently available from a given connection.
- * @param connection_id
- * @return A list of entities
+ * @brief Find existing connection by its id.
+ * @param conn_id Connection id as specified at connect time.
+ * @return Smart pointed to existing connection or invalid pointer if not found.
  */
-std::vector<EntityInfo> scan(const std::string& connection_id);
-
-/**
- * @brief Schedule reading a new value.
- * @param addrspec Address of the value to read.
- * @param cb Function to be called uppon completion.
- */
-bool scheduleTask(const std::string& addrspec, const Callback& cb);
+std::shared_ptr<BaseProvider> getConnection(const std::string& conn_id);
 
 } // namespace provider
 } // namespace epicsipmi
