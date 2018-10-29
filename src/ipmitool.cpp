@@ -81,7 +81,16 @@ bool IpmiToolProvider::connect(const std::string& hostname,
 
 std::vector<EntityInfo> IpmiToolProvider::scan()
 {
+    auto comp = [](const ::entity_id& lhs, const ::entity_id& rhs) {
+        // must be non-reflexive, transitive, anti-symmetric, negative transitive
+        if (lhs.id != rhs.id) return lhs.id < rhs.id;
+        if (lhs.instance != rhs.instance) return lhs.instance < rhs.instance;
+        return lhs.logical != rhs.logical;
+    };
+
     std::vector<EntityInfo> entities;
+    std::map<struct ::entity_id, size_t, decltype(comp)> frus(comp);
+    std::map<size_t, struct ::entity_id> sensors;
 
     if (!m_intf)
         return entities;
@@ -105,21 +114,33 @@ std::vector<EntityInfo> IpmiToolProvider::scan()
             switch (header->type) {
                 case SDR_RECORD_TYPE_FULL_SENSOR:
                     entities.emplace_back( extractSensorInfo(reinterpret_cast<::sdr_record_full_sensor*>(rec)) );
+                    sensors[entities.size()] = reinterpret_cast<::sdr_record_full_sensor*>(rec)->cmn.entity;
                     break;
                 case SDR_RECORD_TYPE_COMPACT_SENSOR:
                     entities.emplace_back( extractSensorInfo(reinterpret_cast<::sdr_record_compact_sensor*>(rec)) );
+                    sensors[entities.size()] = reinterpret_cast<::sdr_record_full_sensor*>(rec)->cmn.entity;
                     break;
                 case SDR_RECORD_TYPE_MC_DEVICE_LOCATOR:
                     //slaves_.insert(reinterpret_cast< ::sdr_record_mc_locator*>(rec)->dev_slave_addr);
                     break;
                 case SDR_RECORD_TYPE_FRU_DEVICE_LOCATOR:
                     entities.emplace_back( extractFruInfo(reinterpret_cast<::sdr_record_fru_locator*>(rec)) );
+                    frus[ reinterpret_cast<::sdr_record_fru_locator*>(rec)->entity ] = entities.size();
                     break;
                 default:
                     //SuS_LOG_STREAM(finest, log_id(), "ignoring sensor type 0x" << std::hex << +header->type << ".");
                     break;
             }
             ::free(rec);
+        }
+    }
+
+    for (auto& sensor: sensors) {
+        auto fru = frus.find(sensor.second);
+        if (fru != frus.end()) {
+            entities[sensor.first].name.insert(0, entities[fru->second].name + ":");
+        } else {
+            // TODO: logical unit? check Entity Association record
         }
     }
 

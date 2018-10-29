@@ -30,7 +30,7 @@ void printSensorRecords(const std::string& conn_id, FILE *dbfile, const std::str
     }
     bool analog = (valprop->value.type != provider::EntityInfo::Property::Value::Type::IVAL);
 
-    fprintf(dbfile, "record(%s, \"%s%s\") {\n", prefix.c_str(), (analog ? "ai" : "longin"), entity.name.c_str());
+    fprintf(dbfile, "record(%s, \"%s%s\") {\n", (analog ? "ai" : "longin"), prefix.c_str(), entity.name.c_str());
     fprintf(dbfile, "  field(INP,  \"@ipmi(%s SENA %s)\")\n", conn_id.c_str(), entity.addrspec.c_str());
     fprintf(dbfile, "  field(DTYP, \"ipmi\")\n");
     fprintf(dbfile, "  field(DESC, \"%s\")\n", entity.description.substr(0, 40).c_str());
@@ -101,7 +101,7 @@ void printSensorRecords(const std::string& conn_id, FILE *dbfile, const std::str
         if (property.name == "VAL" || property.writable == false)
             continue;
 
-        fprintf(dbfile, "record(%s, \"%s%s:%s\") {\n", prefix.c_str(), (analog ? "ao" : "longout"), entity.name.c_str(), property.name.c_str());
+        fprintf(dbfile, "record(%s, \"%s%s:%s\") {\n", (analog ? "ao" : "longout"), prefix.c_str(), entity.name.c_str(), property.name.c_str());
         fprintf(dbfile, "  field(OUT,  \"@ipmi(%s SENA %s %s)\")\n", conn_id.c_str(), entity.addrspec.c_str(), property.name.c_str());
         fprintf(dbfile, "  field(DTYP, \"ipmi\")\n");
         fprintf(dbfile, "  field(FLNK, \"$(IPMI)%s\")\n", entity.addrspec.c_str());
