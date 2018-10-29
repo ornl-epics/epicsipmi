@@ -17,7 +17,7 @@
 namespace epicsipmi {
 namespace print {
 
-void printSensorRecords(const std::string& conn_id, FILE *dbfile, const provider::EntityInfo& entity)
+void printSensorRecords(const std::string& conn_id, FILE *dbfile, const std::string& prefix, const provider::EntityInfo& entity)
 {
     assert(entity.type == provider::EntityInfo::Type::ANALOG_SENSOR);
 
@@ -30,7 +30,7 @@ void printSensorRecords(const std::string& conn_id, FILE *dbfile, const provider
     }
     bool analog = (valprop->value.type != provider::EntityInfo::Property::Value::Type::IVAL);
 
-    fprintf(dbfile, "record(%s, \"$(IPMI)%s\") {\n", (analog ? "ai" : "longin"), entity.name.c_str());
+    fprintf(dbfile, "record(%s, \"%s%s\") {\n", prefix.c_str(), (analog ? "ai" : "longin"), entity.name.c_str());
     fprintf(dbfile, "  field(INP,  \"@ipmi(%s SENA %s)\")\n", conn_id.c_str(), entity.addrspec.c_str());
     fprintf(dbfile, "  field(DTYP, \"ipmi\")\n");
     fprintf(dbfile, "  field(DESC, \"%s\")\n", entity.description.substr(0, 40).c_str());
@@ -101,7 +101,7 @@ void printSensorRecords(const std::string& conn_id, FILE *dbfile, const provider
         if (property.name == "VAL" || property.writable == false)
             continue;
 
-        fprintf(dbfile, "record(%s, \"$(IPMI)%s:%s\") {\n", (analog ? "ao" : "longout"), entity.name.c_str(), property.name.c_str());
+        fprintf(dbfile, "record(%s, \"%s%s:%s\") {\n", prefix.c_str(), (analog ? "ao" : "longout"), entity.name.c_str(), property.name.c_str());
         fprintf(dbfile, "  field(OUT,  \"@ipmi(%s SENA %s %s)\")\n", conn_id.c_str(), entity.addrspec.c_str(), property.name.c_str());
         fprintf(dbfile, "  field(DTYP, \"ipmi\")\n");
         fprintf(dbfile, "  field(FLNK, \"$(IPMI)%s\")\n", entity.addrspec.c_str());
@@ -109,16 +109,16 @@ void printSensorRecords(const std::string& conn_id, FILE *dbfile, const provider
     }
 }
 
-void printFruRecords(const std::string& conn_id, FILE *dbfile, const provider::EntityInfo& entity)
+void printFruRecords(const std::string& conn_id, FILE *dbfile, const std::string& prefix, const provider::EntityInfo& entity)
 {
     assert(entity.type == provider::EntityInfo::Type::FRU);
 
-    fprintf(dbfile, "record(stringin, \"$(IPMI)%s\") {\n", entity.name.c_str());
+    fprintf(dbfile, "record(stringin, \"%s%s\") {\n", prefix.c_str(), entity.name.c_str());
     fprintf(dbfile, "  field(DESC, \"%s\")\n", entity.description.substr(0, 40).c_str());
     fprintf(dbfile, "}\n");
 
     for (auto& property: entity.properties) {
-        fprintf(dbfile, "record(stringin, \"$(IPMI)%s:%s\") {\n", entity.name.c_str(), property.name.c_str());
+        fprintf(dbfile, "record(stringin, \"%s%s:%s\") {\n", prefix.c_str(), entity.name.c_str(), property.name.c_str());
         fprintf(dbfile, "  field(VAL,  \"%s\")\n", property.value.sval.c_str());
         fprintf(dbfile, "  field(INP,  \"@ipmi(%s FRU %s %s)\")\n", conn_id.c_str(), entity.addrspec.c_str(), property.name.c_str());
         fprintf(dbfile, "  field(DTYP, \"ipmi\")\n");
@@ -154,7 +154,7 @@ void printMenuRecord(FILE *db, const std::string& conn_id, bool output,
 }
 */
 
-void printDatabase(const std::string& conn_id, const std::vector<provider::EntityInfo>& entities, const std::string& path)
+void printDatabase(const std::string& conn_id, const std::vector<provider::EntityInfo>& entities, const std::string& path, const std::string& prefix)
 {
     FILE *dbfile = fopen(path.c_str(), "w");
     if (dbfile == nullptr) {
@@ -164,9 +164,9 @@ void printDatabase(const std::string& conn_id, const std::vector<provider::Entit
 
     for (auto& entity: entities) {
         if (entity.type == provider::EntityInfo::Type::ANALOG_SENSOR) {
-            printSensorRecords(conn_id, dbfile, entity);
+            printSensorRecords(conn_id, dbfile, prefix, entity);
         } else if (entity.type == provider::EntityInfo::Type::FRU) {
-            printFruRecords(conn_id, dbfile, entity);
+            printFruRecords(conn_id, dbfile, prefix, entity);
         }
     }
 

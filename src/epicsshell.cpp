@@ -78,11 +78,13 @@ extern "C" void ipmiScanCallFunc(const iocshArgBuf* args) {
 // ipmiDumpDb(conn_id, db_file)
 static const iocshArg ipmiDumpDbArg0 = { "connection id",     iocshArgString };
 static const iocshArg ipmiDumpDbArg1 = { "output file",       iocshArgString };
+static const iocshArg ipmiDumpDbArg2 = { "PV prefix",         iocshArgString };
 static const iocshArg* ipmiDumpDbArgs[] = {
     &ipmiDumpDbArg0,
     &ipmiDumpDbArg1,
+    &ipmiDumpDbArg2,
 };
-static const iocshFuncDef ipmiDumpDbFuncDef = { "ipmiDumpDb", 2, ipmiDumpDbArgs };
+static const iocshFuncDef ipmiDumpDbFuncDef = { "ipmiDumpDb", 3, ipmiDumpDbArgs };
 
 extern "C" void ipmiDumpDbCallFunc(const iocshArgBuf* args) {
     if (!args[0].sval || !args[1].sval) {
@@ -96,7 +98,7 @@ extern "C" void ipmiDumpDbCallFunc(const iocshArgBuf* args) {
     }
 
     auto entities = conn->scan();
-    print::printDatabase(args[0].sval, entities, args[1].sval);
+    print::printDatabase(args[0].sval, entities, args[1].sval, args[2].sval ? args[2].sval : "");
 }
 
 static void epicsipmiRegistrar ()

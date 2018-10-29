@@ -9,11 +9,11 @@ dbLoadDatabase "${TOP}/dbd/ipmi.dbd"
 ipmi_registerRecordDeviceDriver pdbbase
 
 ## Load record instances
-dbLoadRecords("${TOP}/db/test.db","IPMI=")
+dbLoadRecords("${TOP}/db/test.db","IPMI=IPMI:")
 
 cd ${TOP}/iocBoot/${IOC}
 iocInit
 
 ipmiConnect IPMI1 192.168.1.252
-#ipmiScan IPMI1 verbose
-#ipmiDumpDb IPMI1 /tmp/test.db
+ipmiScan IPMI1 verbose
+#ipmiDumpDb IPMI1 /tmp/test.db \$\(IPMI\):
