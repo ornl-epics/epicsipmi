@@ -118,7 +118,7 @@ std::vector<EntityInfo> IpmiToolProvider::scan()
                     break;
                 case SDR_RECORD_TYPE_COMPACT_SENSOR:
                     entities.emplace_back( extractSensorInfo(reinterpret_cast<::sdr_record_compact_sensor*>(rec)) );
-                    sensors[entities.size()] = reinterpret_cast<::sdr_record_full_sensor*>(rec)->cmn.entity;
+                    sensors[entities.size()] = reinterpret_cast<::sdr_record_compact_sensor*>(rec)->cmn.entity;
                     break;
                 case SDR_RECORD_TYPE_MC_DEVICE_LOCATOR:
                     //slaves_.insert(reinterpret_cast< ::sdr_record_mc_locator*>(rec)->dev_slave_addr);
@@ -128,7 +128,7 @@ std::vector<EntityInfo> IpmiToolProvider::scan()
                     frus[ reinterpret_cast<::sdr_record_fru_locator*>(rec)->entity ] = entities.size();
                     break;
                 default:
-                    //SuS_LOG_STREAM(finest, log_id(), "ignoring sensor type 0x" << std::hex << +header->type << ".");
+                    printf("ignoring sensor type 0x%0X\n", header->type);
                     break;
             }
             ::free(rec);
