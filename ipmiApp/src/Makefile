@@ -7,6 +7,8 @@ include $(TOP)/configure/CONFIG
 
 #=============================
 # Build the IOC application
+#
+USR_CXXFLAGS += -std=c++11 -g -ggdb -O0
 
 ipmitool_DIR = $(IPMITOOL)/lib/.libs/
 
@@ -22,7 +24,6 @@ ipmi_DBD += epicsipmi.dbd
 #ipmi_DBD += xxx.dbd
 
 # Add all the support libraries needed by this IOC
-ipmi_LIBS += ipmitool
 ipmi_LIBS += epicsipmi
 
 # ipmi_registerRecordDeviceDriver.cpp derives from ipmi.dbd
@@ -37,6 +38,10 @@ ipmi_SRCS_vxWorks += -nil-
 
 # Finally link to the EPICS Base libraries
 ipmi_LIBS += $(EPICS_BASE_IOC_LIBS)
+
+#USR_SYS_LIBS += freeipmi
+freeipmi_DIR = /home/kvx/repos/epicsipmi/vendor/freeipmi/libfreeipmi/.libs
+PROD_LIBS += freeipmi
 
 #===========================
 

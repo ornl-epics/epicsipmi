@@ -5,131 +5,161 @@
  * See file LICENSE that is included with this distribution.
  *
  * @author Klemen Vodopivec
- * @date Oct 2018
+ * @date Feb 2019
  */
 
 #pragma once
 
-#include <functional>
-#include <limits>
-#include <list>
-#include <memory>
+#include <epicsEvent.h>
+#include <epicsMutex.h>
+
 #include <string>
+#include <list>
+#include <map>
 #include <vector>
 
-namespace epicsipmi {
-namespace provider {
+#if __cplusplus > 201402L
+#include <variant>
+#else
+#include "variant.hpp"
+namespace std
+{
+  using namespace ::mpark;
+
+  // mpart::get<>() doesn't get merged into std namespace automatically!!!
+  template <std::size_t I, typename... Ts>
+  inline constexpr ::mpark::variant_alternative_t<I, ::mpark::variant<Ts...>> &get(
+      ::mpark::variant<Ts...> &v) {
+    return ::mpark::detail::generic_get<I>(v);
+  }
+
+  template <std::size_t I, typename... Ts>
+  inline constexpr ::mpark::variant_alternative_t<I, ::mpark::variant<Ts...>> &&get(
+      ::mpark::variant<Ts...> &&v) {
+    return ::mpark::detail::generic_get<I>(::mpark::lib::move(v));
+  }
+
+  template <std::size_t I, typename... Ts>
+  inline constexpr const ::mpark::variant_alternative_t<I, ::mpark::variant<Ts...>> &get(
+      const ::mpark::variant<Ts...> &v) {
+    return ::mpark::detail::generic_get<I>(v);
+  }
+
+  template <std::size_t I, typename... Ts>
+  inline constexpr const ::mpark::variant_alternative_t<I, ::mpark::variant<Ts...>> &&get(
+      const ::mpark::variant<Ts...> &&v) {
+    return ::mpark::detail::generic_get<I>(::mpark::lib::move(v));
+  }
+
+  template <typename T, typename... Ts>
+  inline constexpr T &get(::mpark::variant<Ts...> &v) {
+    return ::mpark::get<::mpark::detail::find_index_checked<T, Ts...>::value>(v);
+  }
+
+  template <typename T, typename... Ts>
+  inline constexpr T &&get(::mpark::variant<Ts...> &&v) {
+    return ::mpark::get<::mpark::detail::find_index_checked<T, Ts...>::value>(::mpark::lib::move(v));
+  }
+
+  template <typename T, typename... Ts>
+  inline constexpr const T &get(const ::mpark::variant<Ts...> &v) {
+    return ::mpark::get<::mpark::detail::find_index_checked<T, Ts...>::value>(v);
+  }
+
+  template <typename T, typename... Ts>
+  inline constexpr const T &&get(const ::mpark::variant<Ts...> &&v) {
+    return ::mpark::get<::mpark::detail::find_index_checked<T, Ts...>::value>(::mpark::lib::move(v));
+  }
+}
+#endif
 
 /**
- * @class EntityInfo
- * @brief Holds common IPMI entity information.
+ * @class Provider
+ * @file provider.h
+ * @brief Base Provider class with public interfaces that derived classes must implement.
  */
-struct EntityInfo {
-    enum class Type {
-        NONE = 0,
-        ANALOG_SENSOR,
-        FRU,
-    } type = Type::NONE;
-
-    std::string name{""};           //!< Unique entity name based on id
-    std::string description{""};    //!< Entity description as defined by IPMI system
-    std::string addrspec{""};       //!< Address used to communicate with this entity
-
-    struct Property {
-        struct Value {
-            enum class Type {
-                IVAL,
-                DVAL,
-                SVAL,
-            } type = Type::IVAL;
-            int ival = 0;           //!< Integer value
-            double dval = 0.0;      //!< Floating point value
-            std::string sval = "";  //!< String value, must always be populated even when converting from ival or dval
-            Value& operator=(int v);
-            Value& operator=(double v);
-            Value& operator=(const std::string& v);
-            Value& operator=(const Value& v);
-        };
-
-        std::string name{""};       //!< Property name (like VAL, HIGH, HIHI, Serial, etc.)
-        Value value;
-        bool writable{false};
-    };
-    class Properties : public std::vector<Property> {
-        public:
-            void push_back(const std::string& name, int value);
-            void push_back(const std::string& name, double value);
-            void push_back(const std::string& name, const std::string& value);
-            std::vector<Property>::const_iterator find(const std::string& name) const;
-    } properties;
-//    std::vector<Property> properties;
-};
-
-typedef std::function<void(bool, EntityInfo::Property::Value&)> Callback;
-
-/**
- * @class BaseProvider
- * @brief An abstract provider class with pure-virtual handles.
- *
- * One provider object is instantiated for each IPMI connection.
- * IPMI provider implementations must derive from this class.
- */
-class BaseProvider {
+class Provider {
     public:
-        enum ReturnCode {
-            SUCCESS,
-            NOT_FOUND,
-            NOT_CONNECTED,
-            BAD_ADDRESS,
+        typedef std::variant<int,double,std::string> Variant;           //!< Generic container for entity fields
+        class Entity : public std::map<std::string, Variant> {
+            public:
+                template <typename T>
+                T getField(const std::string& field, const T& default_) const
+                {
+                    auto it = find(field);
+                    if (it != end()) {
+                        auto ptr = std::get_if<T>(&it->second);
+                        if (ptr)
+                            return *ptr;
+                    }
+                    return default_;
+                }
+        };
+        struct Task {
+            std::string address;
+            std::function<void()> callback;
+            Entity& entity;
+            Task(const std::string& address_, const std::function<void()>& cb, Entity& entity_)
+                : address(address_)
+                , callback(cb)
+                , entity(entity_)
+            {};
         };
 
-        /**
-         * @brief Establishes connection with IPMI sub-system.
-         * @param hostname to connect to
-         * @param username credentials to use for connection
-         * @param password credentials to use for connection
-         * @param protocol to be used
-         * @param privlevel privilege level to use for all queries
-         * @return true on connection success, false otherwise
-         */
-        virtual bool connect(const std::string& hostname,
-                             const std::string& username, const std::string& password,
-                             const std::string& protocol, int privlevel) = 0;
+        //typedef std::map<std::string, Variant> Entity;
+
+        class comm_error : public std::runtime_error {
+            public:
+                    comm_error(const std::string& e) : std::runtime_error(e) {};
+        };
+        class syntax_error : public std::runtime_error {
+            public:
+                    syntax_error(const std::string& e) : std::runtime_error(e) {};
+        };
+        class process_error : public std::runtime_error {
+            public:
+                    process_error(const std::string& e) : std::runtime_error(e) {};
+        };
+
+        Provider(const std::string& conn_id);
+
+        ~Provider();
 
         /**
-         * @brief Return a list of all entities currently available.
-         * @return A list of entities
+         * @brief Scan for all sensors in the connected IPMI device.
+         * @return A list of sensors
          */
-        virtual std::vector<EntityInfo> scan() = 0;
+        virtual std::vector<Entity> getSensors() = 0;
 
-        virtual ReturnCode getSensor(const std::string& addrspec, double& val, double& low, double& lolo, double& high, double& hihi, int16_t& prec, double& hyst) { return NOT_FOUND; };
+        /**
+         * @brief Scans for all FRUs in the connected IPMI device.
+         * @return A list of FRUs
+         */
+        virtual std::vector<Entity> getFrus() = 0;
 
-        virtual ReturnCode getFruProperties(const std::string& addrspec, EntityInfo::Properties& properties) { return NOT_FOUND; };
+        /**
+         * @brief Schedules retrieving IPMI value and calling cb function when done.
+         * @param address IPMI entity address
+         * @param cb function to be called upon (un)succesfull completion
+         * @return true if succesfully scheduled and will invoke record post-processing
+         */
+        bool schedule(const Task&& task);
+
+        /**
+         * @brief Thread processing enqueued tasks
+         */
+        void tasksThread();
+
+    private:
+        bool m_tasksProcessed{true};
+        std::list<Task> m_tasks;
+        epicsMutex m_mutex;
+        epicsEvent m_event;
+
+        /**
+         * @brief Based on the address, determine IPMI entity type and retrieve its current value.
+         * @param address FreeIPMI implementation specific address
+         * @return current value
+         */
+        virtual Entity getEntity(const std::string& address) = 0;
 };
-
-/**
- * @brief Establishes connection with IPMI sub-system.
- * @param connection_id unique connection id
- * @param hostname to connect to
- * @param username credentials to use for connection
- * @param password credentials to use for connection
- * @param protocol to be used
- * @param privlevel privilege level to use for all queries
- * @return true on connection success, false otherwise
- *
- * For now only IpmiTool implementation is supported by this function.
- */
-bool connect(const std::string& connection_id, const std::string& hostname,
-             const std::string& username, const std::string& password,
-             const std::string& protocol, int privlevel);
-
-/**
- * @brief Find existing connection by its id.
- * @param conn_id Connection id as specified at connect time.
- * @return Smart pointed to existing connection or invalid pointer if not found.
- */
-std::shared_ptr<BaseProvider> getConnection(const std::string& conn_id);
-
-} // namespace provider
-} // namespace epicsipmi
-

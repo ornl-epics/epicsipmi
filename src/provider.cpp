@@ -5,174 +5,66 @@
  * See file LICENSE that is included with this distribution.
  *
  * @author Klemen Vodopivec
- * @date Oct 2018
+ * @date Feb 2019
  */
 
-#include "provider.h"
-#ifdef HAVE_IPMITOOL
-#include "ipmitool.h"
-#endif // HAVE_IPMITOOL
+#include <common.h>
+#include <provider.h>
 
-#include <map>
+#include <alarm.h>
+#include <epicsThread.h>
 
-#include <epicsMutex.h>
+#include <limits>
 
-namespace epicsipmi {
-namespace provider {
-
-// ***************************************************
-// ***** Forward declaration of static functions *****
-// ***************************************************
-
-// ***************************************************
-// ***** Private definitions                     *****
-// ***************************************************
-
-class ScopedLock {
-    private:
-        epicsMutex &m_mutex;
-    public:
-        explicit ScopedLock(epicsMutex &mutex) : m_mutex(mutex) { m_mutex.lock(); }
-        ~ScopedLock() { m_mutex.unlock(); }
+extern "C" {
+    static void providerThread(void* ctx)
+    {
+        reinterpret_cast<Provider*>(ctx)->tasksThread();
+    }
 };
 
-// ***************************************************
-// ***** Private variables                       *****
-// ***************************************************
-
-/**
- * Global mutex to protect g_connections.
- */
-static epicsMutex g_mutex;
-
-/**
- * Global map of connections.
- */
-static std::map<std::string, std::shared_ptr<BaseProvider>> g_connections;
-
-// ***************************************************
-// ***** Functions implementations               *****
-// ***************************************************
-
-bool connect(const std::string& conn_id, const std::string& hostname,
-             const std::string& username, const std::string& password,
-             const std::string& protocol, int privlevel)
+Provider::Provider(const std::string& conn_id)
 {
-    ScopedLock lock(g_mutex);
+    epicsThreadCreate(conn_id.c_str(), epicsThreadPriorityLow, epicsThreadStackMedium, (EPICSTHREADFUNC)&providerThread, this);
+}
 
-    auto conn = getConnection(conn_id);
-    if (conn)
-        return false;
+Provider::~Provider()
+{
+    m_tasksProcessed = false;
+    m_event.signal();
+    epicsThreadSleep(0.1);
+}
 
-    do {
-#ifdef HAVE_IPMITOOL
-        try {
-            conn.reset(new IpmiToolProvider);
-        } catch (std::bad_alloc& e) {
-            // TODO: LOG
-        }
-        break;
-#endif // HAVE_IPMITOOL
-    } while (0);
-
-
-    if (!conn) {
-        return false;
-    }
-
-    if (!conn->connect(hostname, username, password, protocol, privlevel)) {
-        // TODO: LOG
-        return false;
-    }
-
-    g_connections[conn_id] = conn;
+bool Provider::schedule(const Task&& task)
+{
+    m_mutex.lock();
+    m_tasks.emplace_back(task);
+    m_event.signal();
+    m_mutex.unlock();
     return true;
 }
 
-std::shared_ptr<BaseProvider> getConnection(const std::string& conn_id)
+void Provider::tasksThread()
 {
-    std::shared_ptr<BaseProvider> conn;
-    ScopedLock lock(g_mutex);
+    while (m_tasksProcessed) {
+        m_event.wait();
 
-#ifdef HAVE_IPMITOOL
-    auto ipmitoolconn = g_connections.find(conn_id);
-    if (ipmitoolconn != g_connections.end()) {
-        conn = ipmitoolconn->second;
+        m_mutex.lock();
+        if (m_tasks.empty()) {
+            m_mutex.unlock();
+            continue;
+        }
+
+        Task task = std::move(m_tasks.front());
+        m_tasks.pop_front();
+        m_mutex.unlock();
+
+        try {
+            task.entity = getEntity(task.address);
+        } catch (...) {
+            task.entity["SEVR"] = epicsAlarmComm;
+            task.entity["STAT"] = epicsSevInvalid;
+        }
+        task.callback();
     }
-#endif // HAVE_IPMITOOL
-
-    return conn;
 }
-
-// ***************************************************
-// ***** Entity class functions                  *****
-// ***************************************************
-
-void EntityInfo::Properties::push_back(const std::string& name, int value)
-{
-    Property property;
-    property.name = name;
-    property.value = value;
-    std::vector<Property>::push_back(property);
-}
-
-void EntityInfo::Properties::push_back(const std::string& name, double value)
-{
-    Property property;
-    property.name = name;
-    property.value = value;
-    std::vector<Property>::push_back(property);
-}
-
-void EntityInfo::Properties::push_back(const std::string& name, const std::string& value)
-{
-    Property property;
-    property.name = name;
-    property.value = value;
-    std::vector<Property>::push_back(property);
-}
-
-std::vector<EntityInfo::Property>::const_iterator EntityInfo::Properties::find(const std::string& name) const
-{
-    auto it = begin();
-    for ( ; it != end(); it++) {
-        if (it->name == name)
-            break;
-    }
-    return it;
-}
-
-// ***************************************************
-// ***** Entity::Property::Value class functions *****
-// ***************************************************
-
-EntityInfo::Property::Value& EntityInfo::Property::Value::operator=(int v) {
-    type = Type::IVAL;
-    ival = v;
-    sval = std::to_string(v);
-    return *this;
-}
-
-EntityInfo::Property::Value& EntityInfo::Property::Value::operator=(double v) {
-    type = Type::DVAL;
-    dval = v;
-    sval = std::to_string(v);
-    return *this;
-}
-
-EntityInfo::Property::Value& EntityInfo::Property::Value::operator=(const std::string& v) {
-    type = Type::SVAL;
-    sval = v;
-    return *this;
-}
-
-EntityInfo::Property::Value& EntityInfo::Property::Value::operator=(const EntityInfo::Property::Value& v) {
-    type = v.type;
-    ival = v.ival;
-    dval = v.dval;
-    sval = v.sval;
-    return *this;
-}
-
-} // namespace provider
-} // namespace epicsipmi

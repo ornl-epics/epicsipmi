@@ -5,19 +5,20 @@
  * See file LICENSE that is included with this distribution.
  *
  * @author Klemen Vodopivec
- * @date Oct 2018
+ * @date Feb 2019
  */
 
 #pragma once
 
 #include "provider.h"
 
-namespace epicsipmi {
+#include <string>
+#include <vector>
+
 namespace print {
 
-void printDatabase(const std::string& conn_id, const std::vector<provider::EntityInfo>& entities, const std::string& path, const std::string& prefix);
-void printScanReportBrief(const std::string& conn_id, const std::vector<provider::EntityInfo>& entities);
-void printScanReportFull(const std::string& conn_id, const std::vector<provider::EntityInfo>& entities);
+void printScanReport(const std::string& header, const std::vector<Provider::Entity>& entities);
+
+void printDatabase(const std::string& path, const std::vector<Provider::Entity>& entities, const std::string& pv_prefix);
 
 }; // namespace print
-}; // namespace epicsipmi

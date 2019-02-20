@@ -30,3 +30,11 @@
 *.exe
 *.out
 *.app
+
+# EPICS ioc stuff
+bin
+db
+dbd
+O.linux-*
+O.Common
+envPaths
