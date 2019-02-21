@@ -19,6 +19,6 @@ namespace print {
 
 void printScanReport(const std::string& header, const std::vector<Provider::Entity>& entities);
 
-void printDatabase(const std::string& path, const std::vector<Provider::Entity>& entities, const std::string& pv_prefix);
+void printRecord(FILE* dbfile, const std::string& prefix, const Provider::Entity& entity);
 
 }; // namespace print

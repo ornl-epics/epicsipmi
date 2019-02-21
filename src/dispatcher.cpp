@@ -13,6 +13,7 @@
 #include "print.h"
 #include "dispatcher.h"
 
+#include <cstring>
 #include <map>
 #include <string>
 
@@ -24,14 +25,6 @@ namespace dispatcher {
 
 static std::map<std::string, std::shared_ptr<FreeIpmiProvider>> g_connections; //!< Global map of connections.
 static epicsMutex g_mutex; //!< Global mutex to protect g_connections.
-
-class ScopedLock {
-    private:
-        epicsMutex& m_mutex;
-    public:
-        explicit ScopedLock(epicsMutex &mutex) : m_mutex(mutex) { m_mutex.lock(); }
-        ~ScopedLock() { m_mutex.unlock(); }
-};
 
 static std::pair<std::string, std::string> _parseLink(const std::string& link)
 {
@@ -49,7 +42,7 @@ static std::string _createLink(const std::string& conn_id, const std::string& ad
 
 static std::shared_ptr<FreeIpmiProvider> _getConnection(const std::string& conn_id)
 {
-    ScopedLock lock(g_mutex);
+    common::ScopedLock lock(g_mutex);
     auto it = g_connections.find(conn_id);
     if (it != g_connections.end())
         return it->second;
@@ -61,7 +54,7 @@ bool connect(const std::string& conn_id, const std::string& hostname,
              const std::string& authtype, const std::string& protocol,
              const std::string& privlevel)
 {
-    ScopedLock lock(g_mutex);
+    common::ScopedLock lock(g_mutex);
 
     if (g_connections.find(conn_id) != g_connections.end())
         return false;
@@ -126,18 +119,36 @@ void printDb(const std::string& conn_id, const std::string& path, const std::str
         LOG_ERROR("no such connection " + conn_id);
         return;
     }
-
     auto conn = it->second;
-    auto sensors = conn->getSensors();
-    for (auto& sensor: sensors) {
-        try {
-            auto inp = std::get<std::string>(sensor["INP"]);
-            sensor["INP"] = _createLink(conn_id, inp);
-        } catch (std::bad_variant_access) {
-            LOG_WARN("Sensor doesn't have INP field, skipping");
+
+    FILE *dbfile = fopen(path.c_str(), "w+");
+    if (dbfile == nullptr)
+        LOG_ERROR("Failed to open output database file - %s", strerror(errno));
+
+    try {
+        auto sensors = conn->getSensors();
+        for (auto& sensor: sensors) {
+            auto inp = sensor.getField<std::string>("INP", "");
+            if (!inp.empty()) {
+                sensor["INP"] = _createLink(conn_id, inp);
+                print::printRecord(dbfile, pv_prefix, sensor);
+            }
         }
+
+        auto frus = conn->getFrus();
+        for (auto& fru: frus) {
+            auto inp = fru.getField<std::string>("INP", "");
+            if (!inp.empty()) {
+                fru["INP"] = _createLink(conn_id, inp);
+                print::printRecord(dbfile, pv_prefix, fru);
+            }
+        }
+
+    } catch (...) {
+        // TODO: do we need to log
     }
-    print::printDatabase(path, sensors, pv_prefix);
+
+    fclose(dbfile);
 }
 
 bool checkLink(const std::string& address)

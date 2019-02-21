@@ -151,10 +151,12 @@ class Provider {
         void tasksThread();
 
     private:
-        bool m_tasksProcessed{true};
-        std::list<Task> m_tasks;
-        epicsMutex m_mutex;
-        epicsEvent m_event;
+        struct {
+            bool processing{true};
+            std::list<Task> queue;
+            epicsMutex mutex;
+            epicsEvent event;
+        } m_tasks;
 
         /**
          * @brief Based on the address, determine IPMI entity type and retrieve its current value.

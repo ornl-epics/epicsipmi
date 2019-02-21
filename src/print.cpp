@@ -66,7 +66,7 @@ void printScanReport(const std::string& header, const std::vector<Provider::Enti
     }
 }
 
-std::string _epicsEscape(const std::string& str)
+static std::string _epicsEscape(const std::string& str)
 {
     std::string escaped = str;
     for (auto it = escaped.begin(); it != escaped.end(); it++) {
@@ -78,7 +78,7 @@ std::string _epicsEscape(const std::string& str)
     return escaped;
 }
 
-void _printRecord(FILE* dbfile, const std::string& prefix, const Provider::Entity& entity)
+void printRecord(FILE* dbfile, const std::string& prefix, const Provider::Entity& entity)
 {
     auto stringValue = entity.getField<std::string>("VAL", "<UDF string value>");
     auto doubleValue = entity.getField<double>     ("VAL", std::numeric_limits<double>::min());
@@ -127,10 +127,9 @@ void _printRecord(FILE* dbfile, const std::string& prefix, const Provider::Entit
     auto hyst = entity.getField<double>("HYST", std::numeric_limits<double>::min());
     auto recordName = prefix + _epicsEscape(name);
 
-    fprintf(dbfile,     "record(%s, \"%s\") {\n", recordType.c_str(), recordName.c_str());
-    fprintf(dbfile,     "  field(%s,   \"%s\")\n", (!out.empty() ? "OUT" : "INP"), (!out.empty() ? out.c_str() : inp.c_str()));
+    fprintf(dbfile,     "record(%s, \"%s\") {\n", recordType.c_str(), recordName.substr(0, 60).c_str());
+    fprintf(dbfile,     "  field(%s,  \"%s\")\n", (!out.empty() ? "OUT" : "INP"), (!out.empty() ? out.c_str() : inp.c_str()));
     fprintf(dbfile,     "  field(DTYP, \"ipmi\")\n");
-    fprintf(dbfile,     "  field(NAME, \"%s\")\n", name.substr(0, 60).c_str());
     if (desc != "")
         fprintf(dbfile, "  field(DESC, \"%s\")\n", desc.substr(0, 40).c_str());
     if (egu != "" && stringValue == "<UDF string value>")
@@ -166,19 +165,6 @@ void _printRecord(FILE* dbfile, const std::string& prefix, const Provider::Entit
     if (hyst != std::numeric_limits<double>::min() && doubleValue != std::numeric_limits<double>::min())
         fprintf(dbfile, "  field(HYST, \"%f\")\n", hyst);
     fprintf(dbfile,     "}\n");
-}
-
-void printDatabase(const std::string& path, const std::vector<Provider::Entity>& entities, const std::string& pv_prefix)
-{
-    FILE *dbfile = fopen(path.c_str(), "w+");
-    if (dbfile == nullptr)
-        throw std::runtime_error("failed to open output database file - " + std::string(strerror(errno)));
-
-    for (auto& entity: entities) {
-        _printRecord(dbfile, pv_prefix, entity);
-    }
-
-    fclose(dbfile);
 }
 
 }; // namespace print

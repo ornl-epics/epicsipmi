@@ -42,6 +42,7 @@ class FreeIpmiProvider : public Provider
         int m_privLevel;
         std::string m_protocol;
         std::string m_sdrCachePath;
+        epicsMutex m_apiMutex;          //!< Serializes all external interfaces
 
         struct SensorAddress {
             uint8_t ownerId{0};
@@ -50,6 +51,16 @@ class FreeIpmiProvider : public Provider
             SensorAddress() {};
             SensorAddress(const std::string& address);
             SensorAddress(uint8_t ownerId_, uint8_t ownerLun_, uint8_t sensorNum_);
+            std::string get();
+        };
+
+        struct FruAddress {
+            uint8_t fruId{0};
+            std::string area;
+            std::string subarea;
+            FruAddress() {};
+            FruAddress(const std::string& address);
+            FruAddress(uint8_t fruId_, const std::string& area="", const std::string& subarea_="");
             std::string get();
         };
 
@@ -120,7 +131,11 @@ class FreeIpmiProvider : public Provider
 
         std::string getFruField(const ipmi_fru_field_t& field);
 
-        std::vector<Entity> getFruChassisInfo(uint8_t fruId, const std::string& fruName, const FruArea& fruArea);
+        std::vector<Entity> getFruChassisInfo(uint8_t fruId, const std::string& deviceName, const FruArea& fruArea);
 
-        void getFru(const SdrRecord& record, std::vector<Entity>& frus);
+        Entity getFruChassisSubarea(uint8_t fruId, const FruArea& area, const std::string& subarea);
+
+        std::vector<Entity> getFruAreas(uint8_t fruId, const std::string& deviceName);
+
+        Entity getFru(const FruAddress& address);
 };

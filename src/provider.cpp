@@ -30,34 +30,34 @@ Provider::Provider(const std::string& conn_id)
 
 Provider::~Provider()
 {
-    m_tasksProcessed = false;
-    m_event.signal();
+    m_tasks.processing = false;
+    m_tasks.event.signal();
     epicsThreadSleep(0.1);
 }
 
 bool Provider::schedule(const Task&& task)
 {
-    m_mutex.lock();
-    m_tasks.emplace_back(task);
-    m_event.signal();
-    m_mutex.unlock();
+    m_tasks.mutex.lock();
+    m_tasks.queue.emplace_back(task);
+    m_tasks.event.signal();
+    m_tasks.mutex.unlock();
     return true;
 }
 
 void Provider::tasksThread()
 {
-    while (m_tasksProcessed) {
-        m_event.wait();
+    while (m_tasks.processing) {
+        m_tasks.event.wait();
 
-        m_mutex.lock();
-        if (m_tasks.empty()) {
-            m_mutex.unlock();
+        m_tasks.mutex.lock();
+        if (m_tasks.queue.empty()) {
+            m_tasks.mutex.unlock();
             continue;
         }
 
-        Task task = std::move(m_tasks.front());
-        m_tasks.pop_front();
-        m_mutex.unlock();
+        Task task = std::move(m_tasks.queue.front());
+        m_tasks.queue.pop_front();
+        m_tasks.mutex.unlock();
 
         try {
             task.entity = getEntity(task.address);

@@ -145,6 +145,7 @@ void FreeIpmiProvider::openSdrCache()
 std::vector<FreeIpmiProvider::Entity> FreeIpmiProvider::getSensors()
 {
     std::vector<Entity> v;
+    common::ScopedLock lock(m_apiMutex);
 
     if (ipmi_sdr_cache_first(m_ctx.sdr) < 0)
         throw std::runtime_error("failed to rewind SDR cache - " + std::string(ipmi_sdr_ctx_errormsg(m_ctx.sdr)));
@@ -188,15 +189,21 @@ std::vector<FreeIpmiProvider::Entity> FreeIpmiProvider::getSensors()
 
 FreeIpmiProvider::Entity FreeIpmiProvider::getEntity(const std::string& address)
 {
+    common::ScopedLock lock(m_apiMutex);
+
+    // First token in address is the entity type, like 'SENSOR', 'FRU' etc.
+    // Rest is type specific
     auto tokens = common::split(address, ' ', 1);
-    if (tokens.empty())
+    if (tokens.size() != 2)
         throw Provider::syntax_error("Invalid address '" + address + "'");
 
-    auto type = tokens.front();
-    tokens.erase(tokens.begin());
+    auto type = std::move(tokens.at(0));
+    auto rest = std::move(tokens.at(1));
 
     if (type == "SENSOR") {
-        return getSensor(SensorAddress(tokens.front()));
+        return getSensor(SensorAddress(rest));
+    } else if (type == "FRU") {
+        return getFru(FruAddress(rest));
     } else {
         throw Provider::syntax_error("Invalid address '" + address + "'");
     }
@@ -204,7 +211,8 @@ FreeIpmiProvider::Entity FreeIpmiProvider::getEntity(const std::string& address)
 
 std::vector<FreeIpmiProvider::Entity> FreeIpmiProvider::getFrus()
 {
-    std::vector<Entity> v;
+    common::ScopedLock lock(m_apiMutex);
+    std::vector<Entity> entities;
 
     if (ipmi_sdr_cache_first(m_ctx.sdr) < 0)
         throw std::runtime_error("failed to rewind SDR cache - " + std::string(ipmi_sdr_ctx_errormsg(m_ctx.sdr)));
@@ -220,24 +228,43 @@ std::vector<FreeIpmiProvider::Entity> FreeIpmiProvider::getFrus()
             continue;
         }
 
-        if (recordType == IPMI_SDR_FORMAT_FRU_DEVICE_LOCATOR_RECORD) {
-            SdrRecord record;
-            record.size = ipmi_sdr_cache_record_read(m_ctx.sdr, record.data, IPMI_SDR_MAX_RECORD_LENGTH);
-            if (record.size < 0) {
-                LOG_DEBUG("Failed to read SDR record - %s, skipping", ipmi_sdr_ctx_errormsg(m_ctx.sdr));
-                continue;
-            }
+        if (recordType != IPMI_SDR_FORMAT_FRU_DEVICE_LOCATOR_RECORD)
+            continue;
 
-            try {
-                getFru(record, v);
-//                v.emplace_back(sensor);
-            } catch (std::runtime_error e) {
-                LOG_DEBUG(std::string(e.what()) + ", skipping");
-            }
+        SdrRecord record;
+        record.size = ipmi_sdr_cache_record_read(m_ctx.sdr, record.data, record.max_size);
+        if (record.size < 0) {
+            LOG_DEBUG("Failed to read SDR record - %s, skipping", ipmi_sdr_ctx_errormsg(m_ctx.sdr));
+            continue;
+        }
+
+        uint8_t fruId;
+        uint8_t fruDevice;
+        if (ipmi_sdr_parse_fru_device_locator_parameters(m_ctx.sdr, record.data, record.size, NULL, &fruId, NULL, NULL, &fruDevice, NULL) < 0) {
+            LOG_DEBUG("Failed to get SDR FRU device id - %s", ipmi_sdr_ctx_errormsg(m_ctx.sdr));
+            continue;
+        }
+
+        if (fruDevice == 0)
+            continue;
+
+        char deviceName[IPMI_SDR_MAX_DEVICE_ID_STRING_LENGTH+1] = {0};
+
+        if (ipmi_sdr_parse_device_id_string(m_ctx.sdr, record.data, record.size, deviceName, sizeof(deviceName)-1) < 0) {
+            LOG_DEBUG("Failed to parse SDR FRU device id - %s", ipmi_sdr_ctx_errormsg(m_ctx.sdr));
+            continue;
+        }
+
+        try {
+            auto tmp = getFruAreas(fruId, deviceName);
+            for (auto& e: tmp)
+                entities.emplace_back( std::move(e) );
+        } catch (std::runtime_error e) {
+            LOG_DEBUG(std::string(e.what()) + ", skipping");
         }
     }
 
-    return v;
+    return entities;
 }
 
 FreeIpmiProvider::Entity FreeIpmiProvider::getSensor(const SensorAddress& address)
@@ -375,38 +402,18 @@ FreeIpmiProvider::Entity FreeIpmiProvider::getSensor(const SdrRecord& record)
     return entity;
 }
 
-void FreeIpmiProvider::getFru(const SdrRecord& record, std::vector<Entity>& frus)
+std::vector<Provider::Entity> FreeIpmiProvider::getFruAreas(uint8_t fruId, const std::string& deviceName)
 {
-    Entity fru;
 
-    // Determine entity type
-    uint8_t recordType;
-    if (ipmi_sdr_parse_record_id_and_type(m_ctx.sdr, record.data, record.size, NULL, &recordType) < 0) {
-        throw std::runtime_error("Failed to parse SDR record type - " + std::string(ipmi_sdr_ctx_errormsg(m_ctx.sdr)));
-    }
-    if (recordType != IPMI_SDR_FORMAT_FRU_DEVICE_LOCATOR_RECORD)
-        throw std::runtime_error("SDR record not a sensor");
-
-    uint8_t deviceId;
-    uint8_t fruDevice;
-    if (ipmi_sdr_parse_fru_device_locator_parameters(m_ctx.sdr, record.data, record.size, NULL, &deviceId, NULL, NULL, &fruDevice, NULL) < 0)
-        throw std::runtime_error("Failed to get SDR FRU device id - " + std::string(ipmi_sdr_ctx_errormsg(m_ctx.sdr)));
-
-    if (fruDevice == 0)
-        return;
-
-    char deviceIdStr[IPMI_SDR_MAX_DEVICE_ID_STRING_LENGTH+1] = {0};
-
-    if (ipmi_sdr_parse_device_id_string(m_ctx.sdr, record.data, record.size, deviceIdStr, sizeof(deviceIdStr)-1) < 0)
-        throw std::runtime_error("Failed to parse SDR FRU device id - " + std::string(ipmi_sdr_ctx_errormsg(m_ctx.sdr)));
-
-    if (ipmi_fru_open_device_id(m_ctx.fru, deviceId) < 0)
+    if (ipmi_fru_open_device_id(m_ctx.fru, fruId) < 0)
         throw std::runtime_error("Failed to open FRU device - " + std::string(ipmi_fru_ctx_errormsg(m_ctx.fru)));
 
-    if (ipmi_fru_first(m_ctx.fru) < 0)
+    if (ipmi_fru_first(m_ctx.fru) < 0) {
+        ipmi_fru_close_device_id(m_ctx.fru);
         throw std::runtime_error("Failed to rewind FRU - " + std::string(ipmi_fru_ctx_errormsg(m_ctx.fru)));
+    }
 
-    std::string fruName = deviceIdStr; // Or maybe "Fru" + std::to_string(deviceId)
+    std::vector<Entity> entities;
     do {
         unsigned int areaType = 0;
         FruArea buffer;
@@ -419,10 +426,10 @@ void FreeIpmiProvider::getFru(const SdrRecord& record, std::vector<Entity>& frus
         if (buffer.size == 0)
             continue;
 
-        std::vector<Entity> entities;
+        std::vector<Entity> tmp;
         switch (areaType) {
         case IPMI_FRU_AREA_TYPE_CHASSIS_INFO_AREA:
-            entities = getFruChassisInfo(deviceId, fruName, buffer);
+            tmp = getFruChassisInfo(fruId, deviceName, buffer);
             break;
         case IPMI_FRU_AREA_TYPE_BOARD_INFO_AREA:
             break;
@@ -447,7 +454,72 @@ void FreeIpmiProvider::getFru(const SdrRecord& record, std::vector<Entity>& frus
             break;
         }
 
-    } while (ipmi_fru_next(m_ctx.fru) == 1);;
+        for (auto& e: tmp)
+            entities.emplace_back( std::move(e) );
+
+    } while (ipmi_fru_next(m_ctx.fru) == 1);
+
+    ipmi_fru_close_device_id(m_ctx.fru);
+
+    return entities;
+}
+
+Provider::Entity FreeIpmiProvider::getFru(const FruAddress& address)
+{
+    if (ipmi_fru_open_device_id(m_ctx.fru, address.fruId) < 0)
+        throw std::runtime_error("Failed to open FRU device - " + std::string(ipmi_fru_ctx_errormsg(m_ctx.fru)));
+
+    if (ipmi_fru_first(m_ctx.fru) < 0) {
+        ipmi_fru_close_device_id(m_ctx.fru);
+        throw std::runtime_error("Failed to rewind FRU - " + std::string(ipmi_fru_ctx_errormsg(m_ctx.fru)));
+    }
+
+    Entity entity;
+    do {
+        unsigned int areaType = 0;
+        FruArea buffer;
+
+        if (ipmi_fru_read_data_area(m_ctx.fru, &areaType, &buffer.size, buffer.data, buffer.max_size-1) < 0)
+            continue;
+        if (buffer.size == 0)
+            continue;
+
+        switch (areaType) {
+        case IPMI_FRU_AREA_TYPE_CHASSIS_INFO_AREA:
+            if (address.area == "CHASSIS")
+                entity = getFruChassisSubarea(address.fruId, buffer, address.subarea);
+            break;
+        case IPMI_FRU_AREA_TYPE_BOARD_INFO_AREA:
+            break;
+        case IPMI_FRU_AREA_TYPE_PRODUCT_INFO_AREA:
+            break;
+        case IPMI_FRU_AREA_TYPE_MULTIRECORD_POWER_SUPPLY_INFORMATION:
+            break;
+        case IPMI_FRU_AREA_TYPE_MULTIRECORD_DC_OUTPUT:
+            break;
+        case IPMI_FRU_AREA_TYPE_MULTIRECORD_DC_LOAD:
+        case IPMI_FRU_AREA_TYPE_MULTIRECORD_EXTENDED_DC_LOAD:
+            break;
+        case IPMI_FRU_AREA_TYPE_MULTIRECORD_MANAGEMENT_ACCESS_RECORD:
+            break;
+        case IPMI_FRU_AREA_TYPE_MULTIRECORD_BASE_COMPATABILITY_RECORD:
+            break;
+        case IPMI_FRU_AREA_TYPE_MULTIRECORD_EXTENDED_COMPATABILITY_RECORD:
+            break;
+        case IPMI_FRU_AREA_TYPE_MULTIRECORD_OEM:
+            break;
+        default:
+            break;
+        }
+
+    } while (ipmi_fru_next(m_ctx.fru) == 1 && entity.empty());
+
+    ipmi_fru_close_device_id(m_ctx.fru);
+
+    if (entity.empty())
+        throw Provider::process_error("FRU area not found");
+
+    return entity;
 }
 
 std::string FreeIpmiProvider::getSensorAddress(const SdrRecord& record)
@@ -506,7 +578,7 @@ std::string FreeIpmiProvider::getFruField(const ipmi_fru_field_t& field)
     return std::string(strbuf);
 }
 
-std::vector<FreeIpmiProvider::Entity> FreeIpmiProvider::getFruChassisInfo(uint8_t fruId, const std::string& fruName, const FruArea& fruArea)
+std::vector<Provider::Entity> FreeIpmiProvider::getFruChassisInfo(uint8_t fruId, const std::string& deviceName, const FruArea& fruArea)
 {
     std::vector<Entity> entities;
 
@@ -515,6 +587,7 @@ std::vector<FreeIpmiProvider::Entity> FreeIpmiProvider::getFruChassisInfo(uint8_
     ipmi_fru_field_t partNum;
     ipmi_fru_field_t serialNum;
     ipmi_fru_field_t customFields[IPMI_FRU_CUSTOM_FIELDS];
+    auto fruName = "Fru" + std::to_string(fruId);
 
     if (ipmi_fru_chassis_info_area (m_ctx.fru, fruArea.data, fruArea.size, &type, &partNum, &serialNum, customFields, IPMI_FRU_CUSTOM_FIELDS) < 0)
         throw std::runtime_error("Failed to parse FRU chassis info - " + std::string(ipmi_fru_ctx_errormsg(m_ctx.fru)));
@@ -523,6 +596,7 @@ std::vector<FreeIpmiProvider::Entity> FreeIpmiProvider::getFruChassisInfo(uint8_
 
     Entity chassis;
     chassis["NAME"] = fruName + " Chassis Type";
+    chassis["DESC"] = deviceName + " Chassis Type";
     chassis["VAL"] = ipmi_fru_chassis_types[type];
     chassis["INP"] = "FRU " + std::to_string(fruId) + " CHASSIS TYPE";
     entities.emplace_back( std::move(chassis) );
@@ -531,6 +605,7 @@ std::vector<FreeIpmiProvider::Entity> FreeIpmiProvider::getFruChassisInfo(uint8_
     if (str != "") {
         Entity partnum;
         partnum["NAME"] = fruName + " Chassis PartNum";
+        partnum["DESC"] = deviceName + " Chassis PartNum";
         partnum["VAL"] = str;
         partnum["INP"] = "FRU " + std::to_string(fruId) + " CHASSIS PARTNUM";
         entities.emplace_back( std::move(partnum) );
@@ -540,6 +615,7 @@ std::vector<FreeIpmiProvider::Entity> FreeIpmiProvider::getFruChassisInfo(uint8_
     if (str != "") {
         Entity serial;
         serial["NAME"] = fruName + " Chassis Serial";
+        serial["DESC"] = deviceName + " Chassis Serial";
         serial["VAL"] = str;
         serial["INP"] = "FRU " + std::to_string(fruId) + " CHASSIS SERIAL";
         entities.emplace_back( std::move(serial) );
@@ -550,13 +626,47 @@ std::vector<FreeIpmiProvider::Entity> FreeIpmiProvider::getFruChassisInfo(uint8_
         if (str != "") {
             Entity field;
             field["NAME"] = fruName + " Chassis Field" + std::to_string(i);
+            field["DESC"] = deviceName + " Chassis Field" + std::to_string(i);
             field["VAL"] = str;
             field["INP"] = "FRU " + std::to_string(fruId) + " CHASSIS FIELD" + std::to_string(i);
             entities.emplace_back( std::move(field) );
         }
     }
-
     return entities;
+}
+
+Provider::Entity FreeIpmiProvider::getFruChassisSubarea(uint8_t fruId, const FruArea& area, const std::string& subarea)
+{
+    static const size_t IPMI_FRU_CUSTOM_FIELDS = 64;
+    uint8_t type;
+    ipmi_fru_field_t partNum;
+    ipmi_fru_field_t serialNum;
+    ipmi_fru_field_t customFields[IPMI_FRU_CUSTOM_FIELDS];
+
+    if (ipmi_fru_chassis_info_area (m_ctx.fru, area.data, area.size, &type, &partNum, &serialNum, customFields, IPMI_FRU_CUSTOM_FIELDS) < 0)
+        throw Provider::process_error("Failed to parse FRU chassis info - " + std::string(ipmi_fru_ctx_errormsg(m_ctx.fru)));
+    if (!IPMI_FRU_CHASSIS_TYPE_VALID(type))
+        type = IPMI_FRU_CHASSIS_TYPE_UNKNOWN;
+
+    Entity entity;
+    if (subarea == "TYPE") {
+        entity["VAL"] = ipmi_fru_chassis_types[type];
+    } else if (subarea == "PARTNUM") {
+        entity["VAL"] = getFruField(partNum);
+    } else if (subarea == "SERIAL") {
+        entity["VAL"] = getFruField(partNum);
+    } else if (subarea.find("FIELD") == 0) {
+        std::string tmp = subarea;
+        tmp.erase(0, 5);
+        size_t i = std::stol(tmp);
+        if (i >= IPMI_FRU_CUSTOM_FIELDS)
+            throw Provider::syntax_error("Invalid FRU field id " + subarea);
+        entity["VAL"] = getFruField(customFields[i]);
+    } else {
+        throw Provider::syntax_error("Invalid FRU chassis id " + subarea);
+    }
+
+    return entity;
 }
 
 /*
@@ -586,4 +696,36 @@ FreeIpmiProvider::SensorAddress::SensorAddress(uint8_t ownerId_, uint8_t ownerLu
 std::string FreeIpmiProvider::SensorAddress::get()
 {
     return std::to_string(ownerId) + ":" + std::to_string(ownerLun) + ":" + std::to_string(sensorNum);
+}
+
+/*
+ * ===== FruAddress implementation =====
+ */
+FreeIpmiProvider::FruAddress::FruAddress(const std::string& address)
+{
+    auto tokens = common::split(address, ' ', 3);
+    if (tokens.size() < 2)
+        throw Provider::syntax_error("Invalid FRU address");
+
+    try {
+        fruId   = std::stoi(tokens[0]) & 0xFF;
+        area    = tokens[1];
+        subarea = (tokens.size() == 3 ? tokens[2] : "");
+    } catch (std::invalid_argument) {
+        throw Provider::syntax_error("Invalid FRU address");
+    }
+}
+
+FreeIpmiProvider::FruAddress::FruAddress(uint8_t fruId_, const std::string& area_, const std::string& subarea_)
+    : fruId(fruId_)
+    , area(area_)
+    , subarea(subarea_)
+{}
+
+std::string FreeIpmiProvider::FruAddress::get()
+{
+    std::string addr = std::to_string(fruId) + " " + area;
+    if (!subarea.empty())
+        addr += " " + subarea;
+    return addr;
 }
