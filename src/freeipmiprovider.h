@@ -43,6 +43,7 @@ class FreeIpmiProvider : public Provider
         std::string m_protocol;
         std::string m_sdrCachePath;
         epicsMutex m_apiMutex;          //!< Serializes all external interfaces
+        int m_utcOffset;                //!< Seconds from UTC, calculated in constructor then cached, no daylight saving info
 
         struct SensorAddress {
             uint8_t ownerId{0};
@@ -129,11 +130,17 @@ class FreeIpmiProvider : public Provider
 
         Entity getSensor(const SdrRecord& record);
 
-        std::string getFruField(const ipmi_fru_field_t& field);
+        std::string getFruField(const ipmi_fru_field_t& field, uint8_t languageCode);
 
-        std::vector<Entity> getFruChassisInfo(uint8_t fruId, const std::string& deviceName, const FruArea& fruArea);
+        // These are called from getFru() and are high-level functions that in turn call getFru*Subarea() functions
+        std::vector<Entity> getFruChassis(uint8_t fruId, const std::string& deviceName, const FruArea& fruArea);
+        std::vector<Entity> getFruBoard(uint8_t fruId, const std::string& deviceName, const FruArea& fruArea);
+        std::vector<Entity> getFruProduct(uint8_t fruId, const std::string& deviceName, const FruArea& fruArea);
 
-        Entity getFruChassisSubarea(uint8_t fruId, const FruArea& area, const std::string& subarea);
+        // Functions that parse individual FRU subareas and return only VAL field in the entity
+        std::string getFruChassisSubarea(uint8_t fruId, const FruArea& area, const std::string& subarea);
+        std::string getFruBoardSubarea(uint8_t fruId, const FruArea& area, const std::string& subarea);
+        std::string getFruProductSubarea(uint8_t fruId, const FruArea& area, const std::string& subarea);
 
         std::vector<Entity> getFruAreas(uint8_t fruId, const std::string& deviceName);
 

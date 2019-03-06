@@ -98,7 +98,7 @@ class Provider {
         struct Task {
             std::string address;
             std::function<void()> callback;
-            Entity& entity;
+            Entity entity;
             Task(const std::string& address_, const std::function<void()>& cb, Entity& entity_)
                 : address(address_)
                 , callback(cb)
@@ -106,19 +106,14 @@ class Provider {
             {};
         };
 
-        //typedef std::map<std::string, Variant> Entity;
-
-        class comm_error : public std::runtime_error {
-            public:
-                    comm_error(const std::string& e) : std::runtime_error(e) {};
+        struct comm_error : public std::runtime_error {
+            using std::runtime_error::runtime_error;
         };
-        class syntax_error : public std::runtime_error {
-            public:
-                    syntax_error(const std::string& e) : std::runtime_error(e) {};
+        struct syntax_error : public std::runtime_error {
+            using std::runtime_error::runtime_error;
         };
-        class process_error : public std::runtime_error {
-            public:
-                    process_error(const std::string& e) : std::runtime_error(e) {};
+        struct process_error : public std::runtime_error {
+            using std::runtime_error::runtime_error;
         };
 
         Provider(const std::string& conn_id);

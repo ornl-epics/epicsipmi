@@ -10,6 +10,7 @@
 
 #pragma once
 
+#include <epicsGuard.h>
 #include <epicsMutex.h>
 
 #include <numeric>
@@ -49,6 +50,8 @@ bool contains(const Container<Type,Allocator>& container, const typename Contain
 
 void copy(const std::string& str, char* buf, size_t bufSize);
 
+std::string to_upper(const std::string& s);
+
 template <typename T, size_t S=0>
 struct buffer {
     T* data{nullptr};
@@ -69,12 +72,6 @@ struct buffer {
     }
 };
 
-class ScopedLock {
-    private:
-        epicsMutex& m_mutex;
-    public:
-        explicit ScopedLock(epicsMutex &mutex) : m_mutex(mutex) { m_mutex.lock(); }
-        ~ScopedLock() { m_mutex.unlock(); }
-};
+typedef epicsGuard<epicsMutex> ScopedLock;
 
 }

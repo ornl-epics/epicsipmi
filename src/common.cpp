@@ -10,6 +10,7 @@
 
 #include "common.h"
 
+#include <algorithm>
 #include <iterator>
 #include <stdarg.h>
 #include <stdio.h>
@@ -79,6 +80,13 @@ void copy(const std::string& str, char* buf, size_t bufSize)
 {
     auto n = str.copy(buf, bufSize);
     buf[std::min(bufSize-1, n)] = 0;
+}
+
+std::string to_upper(const std::string& s)
+{
+    std::string out(s);
+    for_each(out.begin(), out.end(), [](char& c) { c = ::toupper((unsigned char)c); });
+    return out;
 }
 
 }; // namespace common

@@ -61,9 +61,14 @@ void Provider::tasksThread()
 
         try {
             task.entity = getEntity(task.address);
+        } catch (std::runtime_error& e) {
+            task.entity["SEVR"] = (int)epicsAlarmComm;
+            task.entity["STAT"] = (int)epicsSevInvalid;
+            LOG_ERROR(e.what());
         } catch (...) {
-            task.entity["SEVR"] = epicsAlarmComm;
-            task.entity["STAT"] = epicsSevInvalid;
+            task.entity["SEVR"] = (int)epicsAlarmComm;
+            task.entity["STAT"] = (int)epicsSevInvalid;
+            LOG_ERROR("Unhandled exception getting IPMI entity");
         }
         task.callback();
     }

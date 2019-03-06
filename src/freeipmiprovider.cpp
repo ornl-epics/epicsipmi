@@ -17,6 +17,22 @@
 
 #include <alarm.h>
 
+int getUtcOffset() {
+    time_t now;
+    time(&now);
+    auto timeinfo = gmtime(&now);
+    time_t utc = mktime(timeinfo);
+    timeinfo = localtime(&now);
+    time_t local = mktime(timeinfo);
+
+    int offsetFromUTC = difftime(utc, local);
+    // TODO: Adjust for DST, but then we need to update periodically
+    //if (timeinfo->tm_isdst)
+    //    offsetFromUTC -= 3600;
+
+    return offsetFromUTC;
+}
+
 FreeIpmiProvider::FreeIpmiProvider(const std::string& conn_id, const std::string& hostname,
                                    const std::string& username, const std::string& password,
                                    const std::string& authtype, const std::string& protocol,
@@ -26,6 +42,7 @@ FreeIpmiProvider::FreeIpmiProvider(const std::string& conn_id, const std::string
     , m_username(username)
     , m_password(password)
     , m_protocol(protocol)
+    , m_utcOffset(getUtcOffset())
 {
     if (authtype == "none" || username.empty())
         m_authType = IPMI_AUTHENTICATION_TYPE_NONE;
@@ -402,126 +419,6 @@ FreeIpmiProvider::Entity FreeIpmiProvider::getSensor(const SdrRecord& record)
     return entity;
 }
 
-std::vector<Provider::Entity> FreeIpmiProvider::getFruAreas(uint8_t fruId, const std::string& deviceName)
-{
-
-    if (ipmi_fru_open_device_id(m_ctx.fru, fruId) < 0)
-        throw std::runtime_error("Failed to open FRU device - " + std::string(ipmi_fru_ctx_errormsg(m_ctx.fru)));
-
-    if (ipmi_fru_first(m_ctx.fru) < 0) {
-        ipmi_fru_close_device_id(m_ctx.fru);
-        throw std::runtime_error("Failed to rewind FRU - " + std::string(ipmi_fru_ctx_errormsg(m_ctx.fru)));
-    }
-
-    std::vector<Entity> entities;
-    do {
-        unsigned int areaType = 0;
-        FruArea buffer;
-
-        if (ipmi_fru_read_data_area(m_ctx.fru, &areaType, &buffer.size, buffer.data, buffer.max_size-1) < 0) {
-            // Silently? skip it
-            continue;
-        }
-
-        if (buffer.size == 0)
-            continue;
-
-        std::vector<Entity> tmp;
-        switch (areaType) {
-        case IPMI_FRU_AREA_TYPE_CHASSIS_INFO_AREA:
-            tmp = getFruChassisInfo(fruId, deviceName, buffer);
-            break;
-        case IPMI_FRU_AREA_TYPE_BOARD_INFO_AREA:
-            break;
-        case IPMI_FRU_AREA_TYPE_PRODUCT_INFO_AREA:
-            break;
-        case IPMI_FRU_AREA_TYPE_MULTIRECORD_POWER_SUPPLY_INFORMATION:
-            break;
-        case IPMI_FRU_AREA_TYPE_MULTIRECORD_DC_OUTPUT:
-            break;
-        case IPMI_FRU_AREA_TYPE_MULTIRECORD_DC_LOAD:
-        case IPMI_FRU_AREA_TYPE_MULTIRECORD_EXTENDED_DC_LOAD:
-            break;
-        case IPMI_FRU_AREA_TYPE_MULTIRECORD_MANAGEMENT_ACCESS_RECORD:
-            break;
-        case IPMI_FRU_AREA_TYPE_MULTIRECORD_BASE_COMPATABILITY_RECORD:
-            break;
-        case IPMI_FRU_AREA_TYPE_MULTIRECORD_EXTENDED_COMPATABILITY_RECORD:
-            break;
-        case IPMI_FRU_AREA_TYPE_MULTIRECORD_OEM:
-            break;
-        default:
-            break;
-        }
-
-        for (auto& e: tmp)
-            entities.emplace_back( std::move(e) );
-
-    } while (ipmi_fru_next(m_ctx.fru) == 1);
-
-    ipmi_fru_close_device_id(m_ctx.fru);
-
-    return entities;
-}
-
-Provider::Entity FreeIpmiProvider::getFru(const FruAddress& address)
-{
-    if (ipmi_fru_open_device_id(m_ctx.fru, address.fruId) < 0)
-        throw std::runtime_error("Failed to open FRU device - " + std::string(ipmi_fru_ctx_errormsg(m_ctx.fru)));
-
-    if (ipmi_fru_first(m_ctx.fru) < 0) {
-        ipmi_fru_close_device_id(m_ctx.fru);
-        throw std::runtime_error("Failed to rewind FRU - " + std::string(ipmi_fru_ctx_errormsg(m_ctx.fru)));
-    }
-
-    Entity entity;
-    do {
-        unsigned int areaType = 0;
-        FruArea buffer;
-
-        if (ipmi_fru_read_data_area(m_ctx.fru, &areaType, &buffer.size, buffer.data, buffer.max_size-1) < 0)
-            continue;
-        if (buffer.size == 0)
-            continue;
-
-        switch (areaType) {
-        case IPMI_FRU_AREA_TYPE_CHASSIS_INFO_AREA:
-            if (address.area == "CHASSIS")
-                entity = getFruChassisSubarea(address.fruId, buffer, address.subarea);
-            break;
-        case IPMI_FRU_AREA_TYPE_BOARD_INFO_AREA:
-            break;
-        case IPMI_FRU_AREA_TYPE_PRODUCT_INFO_AREA:
-            break;
-        case IPMI_FRU_AREA_TYPE_MULTIRECORD_POWER_SUPPLY_INFORMATION:
-            break;
-        case IPMI_FRU_AREA_TYPE_MULTIRECORD_DC_OUTPUT:
-            break;
-        case IPMI_FRU_AREA_TYPE_MULTIRECORD_DC_LOAD:
-        case IPMI_FRU_AREA_TYPE_MULTIRECORD_EXTENDED_DC_LOAD:
-            break;
-        case IPMI_FRU_AREA_TYPE_MULTIRECORD_MANAGEMENT_ACCESS_RECORD:
-            break;
-        case IPMI_FRU_AREA_TYPE_MULTIRECORD_BASE_COMPATABILITY_RECORD:
-            break;
-        case IPMI_FRU_AREA_TYPE_MULTIRECORD_EXTENDED_COMPATABILITY_RECORD:
-            break;
-        case IPMI_FRU_AREA_TYPE_MULTIRECORD_OEM:
-            break;
-        default:
-            break;
-        }
-
-    } while (ipmi_fru_next(m_ctx.fru) == 1 && entity.empty());
-
-    ipmi_fru_close_device_id(m_ctx.fru);
-
-    if (entity.empty())
-        throw Provider::process_error("FRU area not found");
-
-    return entity;
-}
-
 std::string FreeIpmiProvider::getSensorAddress(const SdrRecord& record)
 {
     SensorAddress address;
@@ -559,7 +456,145 @@ std::string FreeIpmiProvider::getSensorUnits(const SdrRecord& record)
     return units;
 }
 
-std::string FreeIpmiProvider::getFruField(const ipmi_fru_field_t& field)
+
+std::vector<Provider::Entity> FreeIpmiProvider::getFruAreas(uint8_t fruId, const std::string& deviceName)
+{
+
+    if (ipmi_fru_open_device_id(m_ctx.fru, fruId) < 0)
+        throw std::runtime_error("Failed to open FRU device - " + std::string(ipmi_fru_ctx_errormsg(m_ctx.fru)));
+
+    if (ipmi_fru_first(m_ctx.fru) < 0) {
+        ipmi_fru_close_device_id(m_ctx.fru);
+        throw std::runtime_error("Failed to rewind FRU - " + std::string(ipmi_fru_ctx_errormsg(m_ctx.fru)));
+    }
+
+    std::vector<Entity> entities;
+    do {
+        unsigned int areaType = 0;
+        FruArea buffer;
+
+        if (ipmi_fru_read_data_area(m_ctx.fru, &areaType, &buffer.size, buffer.data, buffer.max_size-1) < 0) {
+            // Silently? skip it
+            continue;
+        }
+
+        if (buffer.size == 0)
+            continue;
+
+        try {
+            std::vector<Entity> tmp;
+            switch (areaType) {
+            case IPMI_FRU_AREA_TYPE_CHASSIS_INFO_AREA:
+                tmp = getFruChassis(fruId, deviceName, buffer);
+                break;
+            case IPMI_FRU_AREA_TYPE_BOARD_INFO_AREA:
+                tmp = getFruBoard(fruId, deviceName, buffer);
+                break;
+            case IPMI_FRU_AREA_TYPE_PRODUCT_INFO_AREA:
+                tmp = getFruProduct(fruId, deviceName, buffer);
+                break;
+            case IPMI_FRU_AREA_TYPE_MULTIRECORD_POWER_SUPPLY_INFORMATION:
+                break;
+            case IPMI_FRU_AREA_TYPE_MULTIRECORD_DC_OUTPUT:
+                break;
+            case IPMI_FRU_AREA_TYPE_MULTIRECORD_DC_LOAD:
+            case IPMI_FRU_AREA_TYPE_MULTIRECORD_EXTENDED_DC_LOAD:
+                break;
+            case IPMI_FRU_AREA_TYPE_MULTIRECORD_MANAGEMENT_ACCESS_RECORD:
+                break;
+            case IPMI_FRU_AREA_TYPE_MULTIRECORD_BASE_COMPATABILITY_RECORD:
+                break;
+            case IPMI_FRU_AREA_TYPE_MULTIRECORD_EXTENDED_COMPATABILITY_RECORD:
+                break;
+            case IPMI_FRU_AREA_TYPE_MULTIRECORD_OEM:
+                break;
+            default:
+                break;
+            }
+
+            for (const auto& e: tmp)
+                entities.emplace_back( std::move(e) );
+
+        } catch (std::runtime_error e) {
+            LOG_DEBUG(std::string(e.what()) + ", skipping");
+        }
+
+    } while (ipmi_fru_next(m_ctx.fru) == 1);
+
+    ipmi_fru_close_device_id(m_ctx.fru);
+
+    return entities;
+}
+
+Provider::Entity FreeIpmiProvider::getFru(const FruAddress& address)
+{
+    if (ipmi_fru_open_device_id(m_ctx.fru, address.fruId) < 0)
+        throw std::runtime_error("Failed to open FRU device - " + std::string(ipmi_fru_ctx_errormsg(m_ctx.fru)));
+
+    if (ipmi_fru_first(m_ctx.fru) < 0) {
+        ipmi_fru_close_device_id(m_ctx.fru);
+        throw std::runtime_error("Failed to rewind FRU - " + std::string(ipmi_fru_ctx_errormsg(m_ctx.fru)));
+    }
+
+    std::string error;
+    std::string subarea;
+    do {
+        unsigned int areaType = 0;
+        FruArea buffer;
+
+        if (ipmi_fru_read_data_area(m_ctx.fru, &areaType, &buffer.size, buffer.data, buffer.max_size-1) < 0)
+            continue;
+        if (buffer.size == 0)
+            continue;
+
+        try {
+            switch (areaType) {
+            case IPMI_FRU_AREA_TYPE_CHASSIS_INFO_AREA:
+                if (address.area == "CHASSIS")
+                    subarea = getFruChassisSubarea(address.fruId, buffer, address.subarea);
+                break;
+            case IPMI_FRU_AREA_TYPE_BOARD_INFO_AREA:
+                break;
+            case IPMI_FRU_AREA_TYPE_PRODUCT_INFO_AREA:
+                break;
+            case IPMI_FRU_AREA_TYPE_MULTIRECORD_POWER_SUPPLY_INFORMATION:
+                break;
+            case IPMI_FRU_AREA_TYPE_MULTIRECORD_DC_OUTPUT:
+                break;
+            case IPMI_FRU_AREA_TYPE_MULTIRECORD_DC_LOAD:
+            case IPMI_FRU_AREA_TYPE_MULTIRECORD_EXTENDED_DC_LOAD:
+                break;
+            case IPMI_FRU_AREA_TYPE_MULTIRECORD_MANAGEMENT_ACCESS_RECORD:
+                break;
+            case IPMI_FRU_AREA_TYPE_MULTIRECORD_BASE_COMPATABILITY_RECORD:
+                break;
+            case IPMI_FRU_AREA_TYPE_MULTIRECORD_EXTENDED_COMPATABILITY_RECORD:
+                break;
+            case IPMI_FRU_AREA_TYPE_MULTIRECORD_OEM:
+                break;
+            default:
+                break;
+            }
+        } catch (std::runtime_error e) {
+            error = e.what();
+            break;
+        }
+
+    } while (subarea.empty() && ipmi_fru_next(m_ctx.fru) == 1);
+
+    ipmi_fru_close_device_id(m_ctx.fru);
+
+    if (!error.empty())
+        throw Provider::process_error(error);
+    if (subarea.empty())
+        throw Provider::process_error("FRU area not found");
+
+    Entity entity;
+    entity["VAL"] = subarea;
+    return entity;
+}
+
+std::string FreeIpmiProvider::getFruField(const ipmi_fru_field_t& field, uint8_t languageCode)
 {
     char strbuf[IPMI_FRU_AREA_STRING_MAX + 1] = {0};
     unsigned int strbuflen = IPMI_FRU_AREA_STRING_MAX;
@@ -570,7 +605,7 @@ std::string FreeIpmiProvider::getFruField(const ipmi_fru_field_t& field)
     if (ipmi_fru_type_length_field_to_string(m_ctx.fru,
                                              field.type_length_field,
                                              field.type_length_field_length,
-                                             IPMI_FRU_LANGUAGE_CODE_ENGLISH,
+                                             languageCode,
                                              strbuf,
                                              &strbuflen) < 0)
         return "";
@@ -578,64 +613,40 @@ std::string FreeIpmiProvider::getFruField(const ipmi_fru_field_t& field)
     return std::string(strbuf);
 }
 
-std::vector<Provider::Entity> FreeIpmiProvider::getFruChassisInfo(uint8_t fruId, const std::string& deviceName, const FruArea& fruArea)
+std::vector<Provider::Entity> FreeIpmiProvider::getFruChassis(uint8_t fruId, const std::string& deviceName, const FruArea& fruArea)
 {
-    std::vector<Entity> entities;
-
     static const size_t IPMI_FRU_CUSTOM_FIELDS = 64;
-    uint8_t type;
-    ipmi_fru_field_t partNum;
-    ipmi_fru_field_t serialNum;
-    ipmi_fru_field_t customFields[IPMI_FRU_CUSTOM_FIELDS];
+
+    std::vector<Entity> entities;
     auto fruName = "Fru" + std::to_string(fruId);
 
-    if (ipmi_fru_chassis_info_area (m_ctx.fru, fruArea.data, fruArea.size, &type, &partNum, &serialNum, customFields, IPMI_FRU_CUSTOM_FIELDS) < 0)
-        throw std::runtime_error("Failed to parse FRU chassis info - " + std::string(ipmi_fru_ctx_errormsg(m_ctx.fru)));
-    if (!IPMI_FRU_CHASSIS_TYPE_VALID(type))
-        type = IPMI_FRU_CHASSIS_TYPE_UNKNOWN;
-
-    Entity chassis;
-    chassis["NAME"] = fruName + " Chassis Type";
-    chassis["DESC"] = deviceName + " Chassis Type";
-    chassis["VAL"] = ipmi_fru_chassis_types[type];
-    chassis["INP"] = "FRU " + std::to_string(fruId) + " CHASSIS TYPE";
-    entities.emplace_back( std::move(chassis) );
-
-    auto str = getFruField(partNum);
-    if (str != "") {
-        Entity partnum;
-        partnum["NAME"] = fruName + " Chassis PartNum";
-        partnum["DESC"] = deviceName + " Chassis PartNum";
-        partnum["VAL"] = str;
-        partnum["INP"] = "FRU " + std::to_string(fruId) + " CHASSIS PARTNUM";
-        entities.emplace_back( std::move(partnum) );
-    }
-
-    str = getFruField(serialNum);
-    if (str != "") {
-        Entity serial;
-        serial["NAME"] = fruName + " Chassis Serial";
-        serial["DESC"] = deviceName + " Chassis Serial";
-        serial["VAL"] = str;
-        serial["INP"] = "FRU " + std::to_string(fruId) + " CHASSIS SERIAL";
-        entities.emplace_back( std::move(serial) );
-    }
-
+    std::list<std::string> subareas = { "Type", "PartNum", "SerialNum" };
     for (size_t i = 0; i < IPMI_FRU_CUSTOM_FIELDS; i++) {
-        str = getFruField(customFields[i]);
-        if (str != "") {
-            Entity field;
-            field["NAME"] = fruName + " Chassis Field" + std::to_string(i);
-            field["DESC"] = deviceName + " Chassis Field" + std::to_string(i);
-            field["VAL"] = str;
-            field["INP"] = "FRU " + std::to_string(fruId) + " CHASSIS FIELD" + std::to_string(i);
-            entities.emplace_back( std::move(field) );
+        subareas.emplace_back( "Field" + std::to_string(i) );
+    }
+
+    // Yes this is not the most efficient way of doing it,
+    // but getFruChassis() is invoked rarely so we trade performance for cleaner code.
+    for (auto& subarea: subareas) {
+        try {
+            auto SUBAREA = common::to_upper(subarea);
+            auto value = getFruChassisSubarea(fruId, fruArea, SUBAREA);
+            if (!value.empty()) {
+                Entity entity;
+                entity["VAL"] = value;
+                entity["NAME"] = fruName + " Chassis " + subarea;
+                entity["DESC"] = deviceName + " Chassis " + subarea;
+                entity["INP"] = "FRU " + std::to_string(fruId) + " CHASSIS " + SUBAREA;
+                entities.emplace_back( std::move(entity) );
+            }
+        } catch (...) {
+            // pass
         }
     }
     return entities;
 }
 
-Provider::Entity FreeIpmiProvider::getFruChassisSubarea(uint8_t fruId, const FruArea& area, const std::string& subarea)
+std::string FreeIpmiProvider::getFruChassisSubarea(uint8_t fruId, const FruArea& area, const std::string& subarea)
 {
     static const size_t IPMI_FRU_CUSTOM_FIELDS = 64;
     uint8_t type;
@@ -643,30 +654,168 @@ Provider::Entity FreeIpmiProvider::getFruChassisSubarea(uint8_t fruId, const Fru
     ipmi_fru_field_t serialNum;
     ipmi_fru_field_t customFields[IPMI_FRU_CUSTOM_FIELDS];
 
-    if (ipmi_fru_chassis_info_area (m_ctx.fru, area.data, area.size, &type, &partNum, &serialNum, customFields, IPMI_FRU_CUSTOM_FIELDS) < 0)
+    if (ipmi_fru_chassis_info_area(m_ctx.fru, area.data, area.size, &type, &partNum, &serialNum, customFields, IPMI_FRU_CUSTOM_FIELDS) < 0)
         throw Provider::process_error("Failed to parse FRU chassis info - " + std::string(ipmi_fru_ctx_errormsg(m_ctx.fru)));
     if (!IPMI_FRU_CHASSIS_TYPE_VALID(type))
         type = IPMI_FRU_CHASSIS_TYPE_UNKNOWN;
 
     Entity entity;
-    if (subarea == "TYPE") {
-        entity["VAL"] = ipmi_fru_chassis_types[type];
-    } else if (subarea == "PARTNUM") {
-        entity["VAL"] = getFruField(partNum);
-    } else if (subarea == "SERIAL") {
-        entity["VAL"] = getFruField(partNum);
-    } else if (subarea.find("FIELD") == 0) {
+    if (subarea == "TYPE")      return ipmi_fru_chassis_types[type];
+    if (subarea == "PARTNUM")   return getFruField(partNum,   IPMI_FRU_LANGUAGE_CODE_ENGLISH);
+    if (subarea == "SERIALNUM") return getFruField(serialNum, IPMI_FRU_LANGUAGE_CODE_ENGLISH);
+    if (subarea.find("FIELD") == 0) {
         std::string tmp = subarea;
         tmp.erase(0, 5);
         size_t i = std::stol(tmp);
-        if (i >= IPMI_FRU_CUSTOM_FIELDS)
-            throw Provider::syntax_error("Invalid FRU field id " + subarea);
-        entity["VAL"] = getFruField(customFields[i]);
-    } else {
-        throw Provider::syntax_error("Invalid FRU chassis id " + subarea);
+        if (i < IPMI_FRU_CUSTOM_FIELDS)
+            return getFruField(customFields[i], IPMI_FRU_LANGUAGE_CODE_ENGLISH);
+    }
+    throw Provider::syntax_error("Invalid FRU chassis area " + subarea);
+}
+
+std::vector<Provider::Entity> FreeIpmiProvider::getFruBoard(uint8_t fruId, const std::string& deviceName, const FruArea& fruArea)
+{
+    static const size_t IPMI_FRU_CUSTOM_FIELDS = 64;
+
+    std::vector<Entity> entities;
+    auto fruName = "Fru" + std::to_string(fruId);
+
+    std::list<std::string> subareas = { "DateTime", "Manufacturer", "Product", "PartNum", "SerialNum", "FileId" };
+    for (size_t i = 0; i < IPMI_FRU_CUSTOM_FIELDS; i++) {
+        subareas.emplace_back( "Field" + std::to_string(i) );
     }
 
-    return entity;
+    // Yes this is not the most efficient way of doing it,
+    // but getFruChassis() is invoked rarely so we trade performance for cleaner code.
+    for (auto& subarea: subareas) {
+        try {
+            auto SUBAREA = common::to_upper(subarea);
+            auto value = getFruBoardSubarea(fruId, fruArea, SUBAREA);
+            if (!value.empty()) {
+                Entity entity;
+                entity["VAL"] = value;
+                entity["NAME"] = fruName + " Board " + subarea;
+                entity["DESC"] = deviceName + " Board " + subarea;
+                entity["INP"] = "FRU " + std::to_string(fruId) + " BOARD " + SUBAREA;
+                entities.emplace_back( std::move(entity) );
+            }
+        } catch (...) {
+            // pass
+        }
+    }
+    return entities;
+}
+
+std::string FreeIpmiProvider::getFruBoardSubarea(uint8_t fruId, const FruArea& area, const std::string& subarea)
+{
+    static const size_t IPMI_FRU_CUSTOM_FIELDS = 64;
+    static const size_t IPMI_FRU_BOARD_STR_BUFLEN = 1024;
+
+    uint8_t langCode;
+    uint32_t dateTime;
+    ipmi_fru_field_t manufacturer;
+    ipmi_fru_field_t product;
+    ipmi_fru_field_t serialNum;
+    ipmi_fru_field_t partNum;
+    ipmi_fru_field_t fruFileId;
+    ipmi_fru_field_t customFields[IPMI_FRU_CUSTOM_FIELDS];
+
+    if (ipmi_fru_board_info_area(m_ctx.fru, area.data, area.size, &langCode, &dateTime, &manufacturer, &product, &serialNum, &partNum, &fruFileId, customFields, IPMI_FRU_CUSTOM_FIELDS) < 0)
+        throw Provider::process_error("Failed to parse FRU chassis info - " + std::string(ipmi_fru_ctx_errormsg(m_ctx.fru)));
+
+    if (subarea == "MANUFACTURER") return getFruField(manufacturer, langCode);
+    if (subarea == "PRODUCT")      return getFruField(product,      langCode);
+    if (subarea == "SERIALNUM")    return getFruField(serialNum,    langCode);
+    if (subarea == "PARTNUM")      return getFruField(partNum,      langCode);
+    if (subarea == "FILEID")       return getFruField(fruFileId,    langCode);
+    if (subarea == "DATETIME") {
+        char buf[IPMI_FRU_BOARD_STR_BUFLEN + 1] = { 0 };
+        int flags = IPMI_TIMESTAMP_FLAG_UTC_TO_LOCALTIME | IPMI_TIMESTAMP_FLAG_DEFAULT;
+        if (dateTime != IPMI_FRU_MFG_DATE_TIME_UNSPECIFIED) {
+            return "unspecified";
+        } else if (ipmi_timestamp_string(dateTime, m_utcOffset, flags, "%D - %T", buf, sizeof(buf)-1) < 0) {
+            return "invalid";
+        } else {
+            return buf;
+        }
+    }
+    if (subarea.find("FIELD") == 0) {
+        std::string tmp = subarea;
+        tmp.erase(0, 5);
+        size_t i = std::stol(tmp);
+        if (i < IPMI_FRU_CUSTOM_FIELDS)
+            return getFruField(customFields[i], langCode);
+    }
+    throw Provider::syntax_error("Invalid FRU board area " + subarea);
+}
+
+
+std::vector<Provider::Entity> FreeIpmiProvider::getFruProduct(uint8_t fruId, const std::string& deviceName, const FruArea& fruArea)
+{
+    static const size_t IPMI_FRU_CUSTOM_FIELDS = 64;
+
+    std::vector<Entity> entities;
+    auto fruName = "Fru" + std::to_string(fruId);
+
+    std::list<std::string> subareas = { "Manufacturer", "Product", "Model", "Version", "AssetTag", "SerialNum", "FileId" };
+    for (size_t i = 0; i < IPMI_FRU_CUSTOM_FIELDS; i++) {
+        subareas.emplace_back( "Field" + std::to_string(i) );
+    }
+
+    // Yes this is not the most efficient way of doing it,
+    // but getFruChassis() is invoked rarely so we trade performance for cleaner code.
+    for (auto& subarea: subareas) {
+        try {
+            auto SUBAREA = common::to_upper(subarea);
+            auto value = getFruProductSubarea(fruId, fruArea, SUBAREA);
+            if (!value.empty()) {
+                Entity entity;
+                entity["VAL"] = value;
+                entity["NAME"] = fruName + " Board " + subarea;
+                entity["DESC"] = deviceName + " Board " + subarea;
+                entity["INP"] = "FRU " + std::to_string(fruId) + " BOARD " + SUBAREA;
+                entities.emplace_back( std::move(entity) );
+            }
+        } catch (...) {
+            // pass
+        }
+
+    }
+    return entities;
+}
+
+std::string FreeIpmiProvider::getFruProductSubarea(uint8_t fruId, const FruArea& area, const std::string& subarea)
+{
+    static const size_t IPMI_FRU_CUSTOM_FIELDS = 64;
+
+    uint8_t langCode;
+    ipmi_fru_field_t manufacturer;
+    ipmi_fru_field_t product;
+    ipmi_fru_field_t model;
+    ipmi_fru_field_t version;
+    ipmi_fru_field_t serialNum;
+    ipmi_fru_field_t assetTag;
+    ipmi_fru_field_t fruFileId;
+    ipmi_fru_field_t customFields[IPMI_FRU_CUSTOM_FIELDS];
+
+    if (ipmi_fru_product_info_area(m_ctx.fru, area.data, area.size, &langCode, &manufacturer, &product, &model, &version, &serialNum, &assetTag, &fruFileId, customFields, IPMI_FRU_CUSTOM_FIELDS) < 0)
+        throw Provider::process_error("Failed to parse FRU chassis info - " + std::string(ipmi_fru_ctx_errormsg(m_ctx.fru)));
+
+    if (subarea == "MANUFACTURER") return getFruField(manufacturer, langCode);
+    if (subarea == "PRODUCT")      return getFruField(product,      langCode);
+    if (subarea == "MODEL")        return getFruField(model,        langCode);
+    if (subarea == "VERSION")      return getFruField(version,      langCode);
+    if (subarea == "SERIALNUM")    return getFruField(serialNum,    langCode);
+    if (subarea == "ASSETTAG")     return getFruField(assetTag,     langCode);
+    if (subarea == "FILEID")       return getFruField(fruFileId,    langCode);
+    if (subarea.find("FIELD") == 0) {
+        std::string tmp = subarea;
+        tmp.erase(0, 5);
+        size_t i = std::stol(tmp);
+        if (i < IPMI_FRU_CUSTOM_FIELDS)
+            return getFruField(customFields[i], langCode);
+    }
+    throw Provider::syntax_error("Invalid FRU product area " + subarea);
 }
 
 /*
