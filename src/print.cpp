@@ -70,7 +70,7 @@ static std::string _epicsEscape(const std::string& str)
 {
     std::string escaped = str;
     for (auto it = escaped.begin(); it != escaped.end(); it++) {
-        if (isalnum(*it) == 0) {
+        if (isalnum(*it) == 0 && *it != ':') {
             if (*it == ' ') *it = ':';
             else            *it = '_';
         }
@@ -128,8 +128,8 @@ void printRecord(FILE* dbfile, const std::string& prefix, const Provider::Entity
     auto recordName = prefix + _epicsEscape(name);
 
     fprintf(dbfile,     "record(%s, \"%s\") {\n", recordType.c_str(), recordName.substr(0, 60).c_str());
-    fprintf(dbfile,     "  field(%s,  \"%s\")\n", (!out.empty() ? "OUT" : "INP"), (!out.empty() ? out.c_str() : inp.c_str()));
     fprintf(dbfile,     "  field(DTYP, \"ipmi\")\n");
+    fprintf(dbfile,     "  field(%s,  \"%s\")\n", (!out.empty() ? "OUT" : "INP"), (!out.empty() ? out.c_str() : inp.c_str()));
     if (desc != "")
         fprintf(dbfile, "  field(DESC, \"%s\")\n", desc.substr(0, 40).c_str());
     if (egu != "" && stringValue == "<UDF string value>")

@@ -8,11 +8,7 @@
  * @date Oct 2018
  */
 
-#include "common.h"
 #include "freeipmiprovider.h"
-
-#include <cstdio>
-#include <stdexcept>
 
 FreeIpmiProvider::FreeIpmiProvider(const std::string& conn_id, const std::string& hostname,
                                    const std::string& username, const std::string& password,
@@ -161,7 +157,7 @@ FreeIpmiProvider::Entity FreeIpmiProvider::getEntity(const std::string& address)
     if (type == "SENSOR") {
         return getSensor(m_ctx.sdr, m_ctx.sensors, SensorAddress(rest));
     } else if (type == "FRU") {
-        return getFru(m_ctx.fru, FruAddress(rest));
+        return getFru(m_ctx.ipmi, m_ctx.sdr, m_ctx.fru, FruAddress(rest));
     } else {
         throw Provider::syntax_error("Invalid address '" + address + "'");
     }
@@ -207,39 +203,3 @@ std::string FreeIpmiProvider::SensorAddress::get()
     return std::to_string(ownerId) + ":" + std::to_string(ownerLun) + ":" + std::to_string(sensorNum);
 }
 
-/*
- * ===== FruAddress implementation =====
- *
- * EPICS record link specification for FRU entities
- * @ipmi <conn> FRU <id> <area> [subarea]
- * Example:
- * @ipmi IPMI1 FRU 10 CHASSIS SERIALNUM
- */
-FreeIpmiProvider::FruAddress::FruAddress(const std::string& address)
-{
-    auto tokens = common::split(address, ' ', 3);
-    if (tokens.size() < 2)
-        throw Provider::syntax_error("Invalid FRU address");
-
-    try {
-        fruId   = std::stoi(tokens[0]) & 0xFF;
-        area    = tokens[1];
-        subarea = (tokens.size() == 3 ? tokens[2] : "");
-    } catch (std::invalid_argument) {
-        throw Provider::syntax_error("Invalid FRU address");
-    }
-}
-
-FreeIpmiProvider::FruAddress::FruAddress(uint8_t fruId_, const std::string& area_, const std::string& subarea_)
-    : fruId(fruId_)
-    , area(area_)
-    , subarea(subarea_)
-{}
-
-std::string FreeIpmiProvider::FruAddress::get()
-{
-    std::string addr = std::to_string(fruId) + " " + area;
-    if (!subarea.empty())
-        addr += " " + subarea;
-    return addr;
-}
