@@ -18,6 +18,8 @@
 
 #include <freeipmi/freeipmi.h>
 
+class IpmiFru;
+
 class FreeIpmiProvider : public Provider
 {
     private:
@@ -43,8 +45,9 @@ class FreeIpmiProvider : public Provider
         std::string m_protocol;
         std::string m_sdrCachePath;
         epicsMutex m_apiMutex;          //!< Serializes all external interfaces
-        int m_utcOffset;                //!< Seconds from UTC, calculated in constructor then cached, no daylight saving info
 
+    protected:
+        friend IpmiFru;
         struct SensorAddress {
             uint8_t ownerId{0};
             uint8_t ownerLun{0};
@@ -122,27 +125,29 @@ class FreeIpmiProvider : public Provider
          */
         Entity getEntity(const std::string& address) override;
 
-        std::string getSensorAddress(const SdrRecord& record);
+        // *** SENSOR functinality implemented in ipmisensor.cpp file ***
 
-        std::string getSensorUnits(const SdrRecord& record);
+        static Entity getSensor(ipmi_sdr_ctx_t sdr, ipmi_sensor_read_ctx_t sensors, const SensorAddress& address);
+        static Entity getSensor(ipmi_sdr_ctx_t sdr, ipmi_sensor_read_ctx_t sensors, const SdrRecord& record);
+        static std::vector<Entity> getSensors(ipmi_sdr_ctx_t sdr, ipmi_sensor_read_ctx_t sensors);
+        static std::string getSensorAddress(ipmi_sdr_ctx_t sdr, const SdrRecord& record);
+        static std::string getSensorUnits(ipmi_sdr_ctx_t sdr, const SdrRecord& record);
 
-        Entity getSensor(const SensorAddress& address);
+        // *** FRU functionality implemented in ipmifru.cpp file ***
 
-        Entity getSensor(const SdrRecord& record);
-
-        std::string getFruField(const ipmi_fru_field_t& field, uint8_t languageCode);
+        static Entity getFru(ipmi_fru_ctx_t fru, const FruAddress& address);
+        static std::vector<Entity> getFrus(ipmi_sdr_ctx_t sdr, ipmi_fru_ctx_t fru);
+        static std::vector<Entity> getFruAreas(ipmi_fru_ctx_t fru, uint8_t fruId, const std::string& deviceName);
+        static std::string getFruField(ipmi_fru_ctx_t fru, const ipmi_fru_field_t& field, uint8_t languageCode);
+        static std::string getFruName(ipmi_sdr_ctx_t sdr, const SdrRecord& record);
 
         // These are called from getFru() and are high-level functions that in turn call getFru*Subarea() functions
-        std::vector<Entity> getFruChassis(uint8_t fruId, const std::string& deviceName, const FruArea& fruArea);
-        std::vector<Entity> getFruBoard(uint8_t fruId, const std::string& deviceName, const FruArea& fruArea);
-        std::vector<Entity> getFruProduct(uint8_t fruId, const std::string& deviceName, const FruArea& fruArea);
+        static std::vector<Entity> getFruChassis(ipmi_fru_ctx_t fru, uint8_t fruId, const std::string& deviceName, const FruArea& fruArea);
+        static std::vector<Entity> getFruBoard(ipmi_fru_ctx_t fru, uint8_t fruId, const std::string& deviceName, const FruArea& fruArea);
+        static std::vector<Entity> getFruProduct(ipmi_fru_ctx_t fru, uint8_t fruId, const std::string& deviceName, const FruArea& fruArea);
 
         // Functions that parse individual FRU subareas and return only VAL field in the entity
-        std::string getFruChassisSubarea(uint8_t fruId, const FruArea& area, const std::string& subarea);
-        std::string getFruBoardSubarea(uint8_t fruId, const FruArea& area, const std::string& subarea);
-        std::string getFruProductSubarea(uint8_t fruId, const FruArea& area, const std::string& subarea);
-
-        std::vector<Entity> getFruAreas(uint8_t fruId, const std::string& deviceName);
-
-        Entity getFru(const FruAddress& address);
+        static std::string getFruChassisSubarea(ipmi_fru_ctx_t fru, uint8_t fruId, const FruArea& area, const std::string& subarea);
+        static std::string getFruBoardSubarea(ipmi_fru_ctx_t fru, uint8_t fruId, const FruArea& area, const std::string& subarea);
+        static std::string getFruProductSubarea(ipmi_fru_ctx_t fru, uint8_t fruId, const FruArea& area, const std::string& subarea);
 };

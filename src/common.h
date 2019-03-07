@@ -74,4 +74,9 @@ struct buffer {
 
 typedef epicsGuard<epicsMutex> ScopedLock;
 
+/**
+ * @brief Return local timezone number of seconds from UTC time
+ */
+int getUtcOffset();
+
 }

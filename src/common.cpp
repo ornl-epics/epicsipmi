@@ -89,4 +89,20 @@ std::string to_upper(const std::string& s)
     return out;
 }
 
+int getUtcOffset() {
+    time_t now;
+    time(&now);
+    auto timeinfo = gmtime(&now);
+    time_t utc = mktime(timeinfo);
+    timeinfo = localtime(&now);
+    time_t local = mktime(timeinfo);
+
+    int offsetFromUTC = difftime(utc, local);
+    // Adjust for DST, but then we need to update periodically
+    if (timeinfo->tm_isdst)
+        offsetFromUTC -= 3600;
+
+    return offsetFromUTC;
+}
+
 }; // namespace common
