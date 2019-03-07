@@ -47,8 +47,8 @@ static long processAiRecord(aiRecord* rec)
     if (rec->pact == 0) {
         rec->pact = 1;
 
-        std::function<void()> cb = std::bind(callbackRequestProcessCallback, (CALLBACK*)rec->dpvt, rec->prio, rec);
-        if (dispatcher::scheduleGet(rec->inp.text, cb, ctx->entity) == false) {
+        std::function<void()> cb = std::bind(callbackRequestProcessCallback, &ctx->callback, rec->prio, rec);
+        if (dispatcher::scheduleGet(rec->inp.value.instio.string, cb, ctx->entity) == false) {
             // Keep PACT=1 to prevent further processing
             recGblSetSevr(rec, epicsAlarmUDF, epicsSevInvalid);
             return -1;
@@ -68,9 +68,9 @@ static long processAiRecord(aiRecord* rec)
     (void)recGblSetSevr(rec, stat, sevr);
 
     if (rec->egu[0] == 0)
-        common::copy(ctx->entity.getField<std::string>("EGU", rec->egu), rec->egu, sizeof(rec->egu));
+        common::copy(ctx->entity.getField<std::string>("EGU", ""), rec->egu, sizeof(rec->egu));
     if (rec->desc[0] == 0)
-        common::copy(ctx->entity.getField<std::string>("DESC", rec->desc), rec->desc, sizeof(rec->desc));
+        common::copy(ctx->entity.getField<std::string>("DESC", ""), rec->desc, sizeof(rec->desc));
 
     return 0;
 }
@@ -82,8 +82,8 @@ static long processStringinRecord(stringinRecord* rec)
     if (rec->pact == 0) {
         rec->pact = 1;
 
-        std::function<void()> cb = std::bind(callbackRequestProcessCallback, (CALLBACK*)rec->dpvt, rec->prio, rec);
-        if (dispatcher::scheduleGet(rec->inp.text, cb, ctx->entity) == false) {
+        std::function<void()> cb = std::bind(callbackRequestProcessCallback, &ctx->callback, rec->prio, rec);
+        if (dispatcher::scheduleGet(rec->inp.value.instio.string, cb, ctx->entity) == false) {
             // Keep PACT=1 to prevent further processing
             recGblSetSevr(rec, epicsAlarmUDF, epicsSevInvalid);
             return -1;
@@ -100,7 +100,7 @@ static long processStringinRecord(stringinRecord* rec)
     rec->stat = ctx->entity.getField<int>("STAT", rec->stat);
 
     if (rec->desc[0] == 0)
-        common::copy(ctx->entity.getField<std::string>("DESC", rec->desc), rec->desc, sizeof(rec->desc));
+        common::copy(ctx->entity.getField<std::string>("DESC", ""), rec->desc, sizeof(rec->desc));
 
     return 0;
 }
