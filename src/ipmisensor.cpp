@@ -195,7 +195,7 @@ std::vector<FreeIpmiProvider::Entity> FreeIpmiProvider::getSensors(ipmi_sdr_ctx_
         // Check if we can assign sensor to a device
         auto it = frus.find(std::make_pair(entityId, entityInstance));
         if (it != frus.end())
-            sensor["NAME"] = name + ":" + sensor.getField<std::string>("NAME", "");
+            sensor["NAME"] = it->second + ":" + sensor.getField<std::string>("NAME", "");
 
         v.emplace_back(std::move(sensor));
     }

@@ -434,7 +434,7 @@ std::vector<Provider::Entity> FreeIpmiProvider::getFruBoard(ipmi_fru_ctx_t fru, 
 
     // We'll modify subarea in each iteration, but we only need it for the address string
     FruAddress addr = address;
-    addr.area = "CHASSIS";
+    addr.area = "BOARD";
 
     // Yes this is not the most efficient way of doing it,
     // but getFruChassis() is invoked rarely so we trade performance for cleaner code.
@@ -513,7 +513,7 @@ std::vector<Provider::Entity> FreeIpmiProvider::getFruProduct(ipmi_fru_ctx_t fru
 
     // We'll modify subarea in each iteration, but we only need it for the address string
     FruAddress addr = address;
-    addr.area = "CHASSIS";
+    addr.area = "PRODUCT";
 
     // Yes this is not the most efficient way of doing it,
     // but getFruChassis() is invoked rarely so we trade performance for cleaner code.
