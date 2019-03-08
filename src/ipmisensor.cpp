@@ -126,6 +126,7 @@ FreeIpmiProvider::Entity FreeIpmiProvider::getSensor(ipmi_sdr_ctx_t sdr, ipmi_se
             if (reading) {
                 // TODO: readingType == IPMI_EVENT_READING_TYPE_CODE_CLASS_GENERIC_DISCRETE ???
                 entity["VAL"] = std::round(*reading * 100.0) / 100.0;
+                entity["RVAL"] = readingRaw;
             } else {
                 entity["VAL"] = 0.0;
                 entity["SEVR"] = epicsSevInvalid;
@@ -139,7 +140,8 @@ FreeIpmiProvider::Entity FreeIpmiProvider::getSensor(ipmi_sdr_ctx_t sdr, ipmi_se
         }
     }
 
-    ipmi_sensor_read_ctx_destroy(sensors);
+    if (reading)
+        free(reading);
 
     return entity;
 }
@@ -147,6 +149,8 @@ FreeIpmiProvider::Entity FreeIpmiProvider::getSensor(ipmi_sdr_ctx_t sdr, ipmi_se
 std::vector<FreeIpmiProvider::Entity> FreeIpmiProvider::getSensors(ipmi_sdr_ctx_t sdr, ipmi_sensor_read_ctx_t sensors)
 {
     std::vector<Entity> v;
+
+    auto frus = getFruEntityNameAssoc(sdr);
 
     if (ipmi_sdr_cache_first(sdr) < 0)
         throw std::runtime_error("failed to rewind SDR cache - " + std::string(ipmi_sdr_ctx_errormsg(sdr)));
@@ -162,21 +166,38 @@ std::vector<FreeIpmiProvider::Entity> FreeIpmiProvider::getSensors(ipmi_sdr_ctx_
             continue;
         }
 
-        if (recordType == IPMI_SDR_FORMAT_FULL_SENSOR_RECORD || recordType == IPMI_SDR_FORMAT_COMPACT_SENSOR_RECORD) {
-            SdrRecord record;
-            record.size = ipmi_sdr_cache_record_read(sdr, record.data, IPMI_SDR_MAX_RECORD_LENGTH);
-            if (record.size < 0) {
-                LOG_DEBUG("Failed to read SDR record - %s, skipping", ipmi_sdr_ctx_errormsg(sdr));
-                continue;
-            }
+        if (recordType != IPMI_SDR_FORMAT_FULL_SENSOR_RECORD && recordType != IPMI_SDR_FORMAT_COMPACT_SENSOR_RECORD)
+            continue;
 
-            try {
-                auto sensor = getSensor(sdr, sensors, record);
-                v.emplace_back(std::move(sensor));
-            } catch (std::runtime_error e) {
-                LOG_DEBUG(std::string(e.what()) + ", skipping");
-            }
+        SdrRecord record;
+        record.size = ipmi_sdr_cache_record_read(sdr, record.data, IPMI_SDR_MAX_RECORD_LENGTH);
+        if (record.size < 0) {
+            LOG_DEBUG("Failed to read SDR record - %s, skipping", ipmi_sdr_ctx_errormsg(sdr));
+            continue;
         }
+
+        // Need entity id for FRU association
+        uint8_t entityId;
+        uint8_t entityInstance;
+        if (ipmi_sdr_parse_entity_id_instance_type(sdr, record.data, record.size, &entityId, &entityInstance, NULL) < 0) {
+            LOG_DEBUG("Failed to read SDR entity info - %s, skipping", ipmi_sdr_ctx_errormsg(sdr));
+            continue;
+        }
+
+        Entity sensor;
+        try {
+            sensor = getSensor(sdr, sensors, record);
+        } catch (std::runtime_error e) {
+            LOG_DEBUG(std::string(e.what()) + ", skipping");
+            continue;
+        }
+
+        // Check if we can assign sensor to a device
+        auto it = frus.find(std::make_pair(entityId, entityInstance));
+        if (it != frus.end())
+            sensor["NAME"] = name + ":" + sensor.getField<std::string>("NAME", "");
+
+        v.emplace_back(std::move(sensor));
     }
 
     return v;

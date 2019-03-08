@@ -139,6 +139,7 @@ class FreeIpmiProvider : public Provider
 
         static Entity getFru(ipmi_ctx_t ipmi, ipmi_sdr_ctx_t sdr, ipmi_fru_ctx_t fru, const FruAddress& address);
         static std::vector<Entity> getFrus(ipmi_sdr_ctx_t sdr, ipmi_fru_ctx_t fru);
+        static std::map<std::pair<uint8_t,uint8_t>,std::string> getFruEntityNameAssoc(ipmi_sdr_ctx_t sdr);
         static std::vector<Entity> getFruAreas(ipmi_fru_ctx_t fru, const FruAddress& address, const Entity& tmpl);
         static std::string getFruField(ipmi_fru_ctx_t fru, const ipmi_fru_field_t& field, uint8_t languageCode);
         static std::string getFruName(ipmi_sdr_ctx_t sdr, const SdrRecord& record);

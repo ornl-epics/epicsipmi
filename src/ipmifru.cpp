@@ -188,14 +188,10 @@ std::vector<FreeIpmiProvider::Entity> FreeIpmiProvider::getFrus(ipmi_sdr_ctx_t s
     if (ipmi_sdr_cache_first(sdr) < 0)
         throw std::runtime_error("failed to rewind SDR cache - " + std::string(ipmi_sdr_ctx_errormsg(sdr)));
 
-    uint16_t recordCount;
-    if (ipmi_sdr_cache_record_count(sdr, &recordCount) < 0)
-        throw std::runtime_error("failed to get number of SDR records - " + std::string(ipmi_sdr_ctx_errormsg(sdr)));
-
     do {
         uint8_t recordType;
         if (ipmi_sdr_parse_record_id_and_type(sdr, NULL, 0, NULL, &recordType) < 0) {
-            LOG_WARN("Failed to parse SDR record type - %s, skipping", ipmi_sdr_ctx_errormsg(sdr));
+            LOG_DEBUG("Failed to parse SDR record type - %s, skipping", ipmi_sdr_ctx_errormsg(sdr));
             continue;
         }
 
@@ -224,6 +220,53 @@ std::vector<FreeIpmiProvider::Entity> FreeIpmiProvider::getFrus(ipmi_sdr_ctx_t s
     } while (ipmi_sdr_cache_next(sdr) == 1);
 
     return entities;
+}
+
+std::map<std::pair<uint8_t,uint8_t>,std::string> FreeIpmiProvider::getFruEntityNameAssoc(ipmi_sdr_ctx_t sdr)
+{
+    std::map<std::pair<uint8_t,uint8_t>,std::string> names;
+
+    if (ipmi_sdr_cache_first(sdr) < 0)
+        throw std::runtime_error("failed to rewind SDR cache - " + std::string(ipmi_sdr_ctx_errormsg(sdr)));
+
+    do {
+        uint8_t recordType;
+        if (ipmi_sdr_parse_record_id_and_type(sdr, NULL, 0, NULL, &recordType) < 0) {
+            LOG_DEBUG("Failed to parse SDR record type - %s, skipping", ipmi_sdr_ctx_errormsg(sdr));
+            continue;
+        }
+
+        if (recordType == IPMI_SDR_FORMAT_FRU_DEVICE_LOCATOR_RECORD) {
+            SdrRecord record;
+            record.size = ipmi_sdr_cache_record_read(sdr, record.data, record.max_size);
+            if (record.size < 0) {
+                LOG_DEBUG("Failed to read SDR record - %s, skipping", ipmi_sdr_ctx_errormsg(sdr));
+                continue;
+            }
+
+            uint8_t entityId;
+            uint8_t entityInstance;
+            if (ipmi_sdr_parse_fru_entity_id_and_instance(sdr, record.data, record.size, &entityId, &entityInstance) < 0) {
+                LOG_DEBUG("Failed to read SDR entity info - %s, skipping", ipmi_sdr_ctx_errormsg(sdr));
+                continue;
+            }
+
+            try {
+                auto key = std::make_pair(entityId, entityInstance);
+                names[key] = getFruName(sdr, record);
+            } catch (std::runtime_error& e) {
+                LOG_DEBUG(std::string(e.what()) + ", skipping");
+                //pass
+            }
+            continue;
+        }
+        if (recordType == IPMI_SDR_FORMAT_ENTITY_ASSOCIATION_RECORD) {
+            // TODO:
+            continue;
+        }
+    } while (ipmi_sdr_cache_next(sdr) == 1);
+
+    return names;
 }
 
 std::vector<Provider::Entity> FreeIpmiProvider::getFruAreas(ipmi_fru_ctx_t fru, const FruAddress& address, const Provider::Entity& tmpl)
