@@ -56,13 +56,7 @@ Provider::Entity FreeIpmiProvider::getFru(ipmi_ctx_t ipmi, ipmi_sdr_ctx_t sdr, i
     if (recordCount == 0)
         throw Provider::process_error("FRU not found");
 
-    if (address.deviceAddr == IPMI_SLAVE_ADDRESS_BMC) {
-        // Need to bridge request through BMC
-        uint8_t channel = address.channel;
-        uint8_t deviceAddr = address.deviceAddr;
-        if (ipmi_ctx_set_target(ipmi, &channel, &deviceAddr) < 0)
-            throw Provider::process_error("Failed to set FRU bridged request");
-    }
+    bool bridged = setBridgeConditional(ipmi, address.channel, address.deviceAddr);
 
     if (ipmi_fru_open_device_id(fru, address.deviceId) < 0)
         throw std::runtime_error("Failed to open FRU device - " + std::string(ipmi_fru_ctx_errormsg(fru)));
@@ -129,6 +123,9 @@ Provider::Entity FreeIpmiProvider::getFru(ipmi_ctx_t ipmi, ipmi_sdr_ctx_t sdr, i
 
     ipmi_fru_close_device_id(fru);
 
+    if (bridged)
+        resetBridge(ipmi);
+
     if (!error.empty())
         throw Provider::process_error(error);
     if (subarea.empty())
@@ -181,7 +178,7 @@ std::string FreeIpmiProvider::getFruDesc(ipmi_sdr_ctx_t sdr, const FreeIpmiProvi
     return deviceDesc;
 }
 
-std::vector<FreeIpmiProvider::Entity> FreeIpmiProvider::getFrus(ipmi_sdr_ctx_t sdr, ipmi_fru_ctx_t fru)
+std::vector<FreeIpmiProvider::Entity> FreeIpmiProvider::getFrus(ipmi_ctx_t ipmi, ipmi_sdr_ctx_t sdr, ipmi_fru_ctx_t fru)
 {
     std::vector<Entity> entities;
 
@@ -205,18 +202,29 @@ std::vector<FreeIpmiProvider::Entity> FreeIpmiProvider::getFrus(ipmi_sdr_ctx_t s
             continue;
         }
 
+        FruAddress address;
+        Entity tmpl;
         try {
-            FruAddress address(sdr, record);
-            Entity tmpl;
+            address = FruAddress(sdr, record);
             tmpl["NAME"] = getFruName(sdr, record);
             tmpl["DESC"] = getFruDesc(sdr, record);
+        } catch (std::runtime_error& e) {
+            LOG_DEBUG(std::string(e.what()) + ", skipping");
+            continue;
+        }
+
+        bool bridged = false;
+        try {
+            bridged = setBridgeConditional(ipmi, address.channel, address.deviceAddr);
             auto tmp = getFruAreas(fru, address, tmpl);
             for (auto& e: tmp)
                 entities.emplace_back( std::move(e) );
         } catch (std::runtime_error& e) {
             LOG_DEBUG(std::string(e.what()) + ", skipping");
-            continue;
         }
+        if (bridged)
+            resetBridge(ipmi);
+
     } while (ipmi_sdr_cache_next(sdr) == 1);
 
     return entities;

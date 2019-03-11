@@ -239,3 +239,39 @@ std::string FreeIpmiProvider::getSensorUnits(ipmi_sdr_ctx_t sdr, const SdrRecord
 
     return units;
 }
+
+
+/*
+ * ===== SensorAddress implementation =====
+ *
+ * EPICS record link specification for SENSOR entities
+ * @ipmi <conn> SENSOR <owner>:<number>:<instance>
+ * Example:
+ * @ipmi IPMI1 SENSOR 22:12:1
+ */
+FreeIpmiProvider::SensorAddress::SensorAddress(const std::string& address)
+{
+    auto tokens = common::split(address, ':');
+    if (tokens.size() != 3)
+        throw Provider::syntax_error("Invalid sensor address");
+
+    try {
+        ownerId   = std::stoi(tokens[0]) & 0xFF;
+        ownerLun  = std::stoi(tokens[1]) & 0xFF;
+        sensorNum = std::stoi(tokens[2]) & 0xFF;
+    } catch (std::invalid_argument) {
+        throw Provider::syntax_error("Invalid sensor address");
+    }
+}
+
+FreeIpmiProvider::SensorAddress::SensorAddress(uint8_t ownerId_, uint8_t ownerLun_, uint8_t sensorNum_)
+    : ownerId(ownerId_)
+    , ownerLun(ownerLun_)
+    , sensorNum(sensorNum_)
+{}
+
+std::string FreeIpmiProvider::SensorAddress::get()
+{
+    return std::to_string(ownerId) + ":" + std::to_string(ownerLun) + ":" + std::to_string(sensorNum);
+}
+

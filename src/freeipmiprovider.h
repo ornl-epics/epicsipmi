@@ -127,6 +127,18 @@ class FreeIpmiProvider : public Provider
          */
         Entity getEntity(const std::string& address) override;
 
+        /**
+         * Establish IPMB bridge if necessary
+         * @return true if bridge established, false otherwise
+         * @throw Provider::process_error on any IPMI library errors
+         */
+        static bool setBridgeConditional(ipmi_ctx_t ipmi, uint8_t channel, uint8_t slaveAddress);
+
+        /**
+         * @brief Resets IPMB bridge to default
+         */
+        static void resetBridge(ipmi_ctx_t ipmi);
+
         // *** SENSOR functinality implemented in ipmisensor.cpp file ***
 
         static Entity getSensor(ipmi_sdr_ctx_t sdr, ipmi_sensor_read_ctx_t sensors, const SensorAddress& address);
@@ -138,7 +150,7 @@ class FreeIpmiProvider : public Provider
         // *** FRU functionality implemented in ipmifru.cpp file ***
 
         static Entity getFru(ipmi_ctx_t ipmi, ipmi_sdr_ctx_t sdr, ipmi_fru_ctx_t fru, const FruAddress& address);
-        static std::vector<Entity> getFrus(ipmi_sdr_ctx_t sdr, ipmi_fru_ctx_t fru);
+        static std::vector<Entity> getFrus(ipmi_ctx_t ipmi, ipmi_sdr_ctx_t sdr, ipmi_fru_ctx_t fru);
         static std::map<std::pair<uint8_t,uint8_t>,std::string> getFruEntityNameAssoc(ipmi_sdr_ctx_t sdr);
         static std::vector<Entity> getFruAreas(ipmi_fru_ctx_t fru, const FruAddress& address, const Entity& tmpl);
         static std::string getFruField(ipmi_fru_ctx_t fru, const ipmi_fru_field_t& field, uint8_t languageCode);

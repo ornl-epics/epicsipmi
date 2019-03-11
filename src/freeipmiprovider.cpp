@@ -166,40 +166,27 @@ FreeIpmiProvider::Entity FreeIpmiProvider::getEntity(const std::string& address)
 std::vector<FreeIpmiProvider::Entity> FreeIpmiProvider::getFrus()
 {
     common::ScopedLock lock(m_apiMutex);
-    return getFrus(m_ctx.sdr, m_ctx.fru);
+    return getFrus(m_ctx.ipmi, m_ctx.sdr, m_ctx.fru);
 }
 
-/*
- * ===== SensorAddress implementation =====
- *
- * EPICS record link specification for SENSOR entities
- * @ipmi <conn> SENSOR <owner>:<number>:<instance>
- * Example:
- * @ipmi IPMI1 SENSOR 22:12:1
- */
-FreeIpmiProvider::SensorAddress::SensorAddress(const std::string& address)
+bool FreeIpmiProvider::setBridgeConditional(ipmi_ctx_t ipmi, uint8_t channel, uint8_t slaveAddress)
 {
-    auto tokens = common::split(address, ':');
-    if (tokens.size() != 3)
-        throw Provider::syntax_error("Invalid sensor address");
+    uint8_t channel_;
+    uint8_t slaveAddress_;
+    if (ipmi_ctx_get_target(ipmi, &channel_, &slaveAddress_) < 0)
+        throw Provider::process_error("Failed to get IPMI target address - " + std::string(ipmi_ctx_errormsg(ipmi)));
 
-    try {
-        ownerId   = std::stoi(tokens[0]) & 0xFF;
-        ownerLun  = std::stoi(tokens[1]) & 0xFF;
-        sensorNum = std::stoi(tokens[2]) & 0xFF;
-    } catch (std::invalid_argument) {
-        throw Provider::syntax_error("Invalid sensor address");
-    }
+    if (channel_ == channel && slaveAddress_ == slaveAddress)
+        return false;
+
+    if (ipmi_ctx_set_target(ipmi, &channel, &slaveAddress) < 0)
+        throw Provider::process_error("Failed to set IPMI target address - " + std::string(ipmi_ctx_errormsg(ipmi)));
+
+    return true;
 }
 
-FreeIpmiProvider::SensorAddress::SensorAddress(uint8_t ownerId_, uint8_t ownerLun_, uint8_t sensorNum_)
-    : ownerId(ownerId_)
-    , ownerLun(ownerLun_)
-    , sensorNum(sensorNum_)
-{}
-
-std::string FreeIpmiProvider::SensorAddress::get()
+void FreeIpmiProvider::resetBridge(ipmi_ctx_t ipmi)
 {
-    return std::to_string(ownerId) + ":" + std::to_string(ownerLun) + ":" + std::to_string(sensorNum);
+    if (ipmi_ctx_set_target(ipmi, NULL, NULL) < 0)
+        throw Provider::process_error("Failed to set IPMI target address - " + std::string(ipmi_ctx_errormsg(ipmi)));
 }
-
