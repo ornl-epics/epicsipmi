@@ -108,8 +108,28 @@ FreeIpmiProvider::Entity FreeIpmiProvider::getSensor(ipmi_sdr_ctx_t sdr, ipmi_se
             }
 
             if (readingType == IPMI_EVENT_READING_TYPE_CODE_CLASS_THRESHOLD) {
-                // TODO: get thresholds, hint: ipmi-sensors-output-common.c:ipmi_sensors_get_thresholds()
-                // and create OUT records for driving them
+                double* lowMinor;
+                double* lowAlarm;
+                double* lowCritical;
+                double* highMinor;
+                double* highAlarm;
+                double* highCritical;
+                if (ipmi_sdr_parse_thresholds(sdr, record.data, record.size,
+                                              &lowMinor, &lowAlarm, &lowCritical,
+                                              &highMinor, &highAlarm, &highCritical) >= 0) {
+                    entity["LOW"] = *lowMinor;
+                    entity["LOLO"] = *lowAlarm;
+                    entity["HIGH"] = *highMinor;
+                    entity["HIHI"] = *highAlarm;
+                    free(lowMinor);
+                    free(lowAlarm);
+                    free(lowCritical);
+                    free(highMinor);
+                    free(highAlarm);
+                    free(highCritical);
+                }
+
+                // TODO: create OUT records for driving thresholds
             }
         }
     }
@@ -218,7 +238,6 @@ std::string FreeIpmiProvider::getSensorUnits(ipmi_sdr_ctx_t sdr, const SdrRecord
 
     return units;
 }
-
 
 /*
  * ===== SensorAddress implementation =====
