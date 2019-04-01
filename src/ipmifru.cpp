@@ -16,11 +16,9 @@ Provider::Entity FreeIpmiProvider::getFru(ipmi_ctx_t ipmi, ipmi_sdr_ctx_t sdr, i
     if (ipmi_sdr_cache_first(sdr) < 0)
         throw std::runtime_error("failed to rewind SDR cache - " + std::string(ipmi_sdr_ctx_errormsg(sdr)));
 
-    uint16_t recordCount;
-    if (ipmi_sdr_cache_record_count(sdr, &recordCount) < 0)
-        throw std::runtime_error("failed to get number of SDR records - " + std::string(ipmi_sdr_ctx_errormsg(sdr)));
-
-    while (recordCount-- > 0) {
+    // Iterate through SDR until a record is found
+    bool found = false;
+    do {
         uint8_t recordType;
         if (ipmi_sdr_parse_record_id_and_type(sdr, NULL, 0, NULL, &recordType) < 0) {
             LOG_WARN("Failed to parse SDR record type - %s, skipping", ipmi_sdr_ctx_errormsg(sdr));
@@ -44,21 +42,21 @@ Provider::Entity FreeIpmiProvider::getFru(ipmi_ctx_t ipmi, ipmi_sdr_ctx_t sdr, i
 
         try {
             FruAddress tmp(sdr, record);
-            if (address.compare(tmp, false, false))
+            if (address.compare(tmp, false, false)) {
+                found = true;
                 break;
+            }
         } catch (Provider::process_error& e) {
             LOG_DEBUG("%s", e.what());
             continue;
         }
-
-        ipmi_sdr_cache_next(sdr);
-    }
-    if (recordCount == 0)
+    } while (ipmi_sdr_cache_next(sdr) == 1);
+    if (!found)
         throw Provider::process_error("FRU not found");
 
     bool bridged = setBridgeConditional(ipmi, address.channel, address.deviceAddr);
 
-    if (ipmi_fru_open_device_id(fru, address.deviceId) < 0)
+    if (ipmi_fru_open_device_id(fru, address.fruId) < 0)
         throw std::runtime_error("Failed to open FRU device - " + std::string(ipmi_fru_ctx_errormsg(fru)));
 
     if (ipmi_fru_first(fru) < 0) {
@@ -138,36 +136,36 @@ Provider::Entity FreeIpmiProvider::getFru(ipmi_ctx_t ipmi, ipmi_sdr_ctx_t sdr, i
 
 std::string FreeIpmiProvider::getFruName(ipmi_sdr_ctx_t sdr, const FreeIpmiProvider::SdrRecord& record)
 {
+    FruAddress address(sdr, record);
     uint8_t entityId;
     uint8_t entityInstance;
     if (ipmi_sdr_parse_fru_entity_id_and_instance(sdr, record.data, record.size, &entityId, &entityInstance) < 0)
         throw Provider::process_error("Failed to get SDR FRU entity info - " + std::string(ipmi_sdr_ctx_errormsg(sdr)));
 
     static const std::vector<std::string> epics_entity_ids = {
-        "Unspec", "Other", "Unkwn", "Proc", "Disk", "Periph", "SysMgmt", "SysBrd", "Mem", "Proc", "PwrSup", "AddIn",
-        "FrontPnl", "BackPnl", "PwrSys", "Drive", "SysIntExp", "OthrSys", "Proc", "PwrUnit", "PwrMod", "PwrMgmt",
-        "ChasBack", "SysChas", "SubChas", "OtherChas", "Disk", "Periph", "Dev", "Fan", "Cool", "Cable", "Mem", "SysSw",
-        "SysFw", "OS", "SysBus", "Grp", "RemMgmt", "Ext", "Batt", "ProcBlade", "Conn", "ProcMem", "IO", "ProcIO",
-        "MgmtFw", "IPMI", "PCI", "PCIe", "SCSI", "SATA", "ProcBus", "RTC", "Unkwn", "Unkwn", "Unkwn", "Unkwn",
-        "Unkwn", "Unkwn", "Unkwn", "Unkwn", "Unkwn", "Unkwn", "Air", "Proc", "Main"
+        "Ent", "Other", "Ent", "Proc", "Disk", "Periph", "Sys", "Sys", "Mem", "Proc", "PS", "AddIn",
+        "Panel", "Panel", "PS", "Drive", "Sys", "Sys", "Proc", "PS", "PS", "PS",
+        "Chas", "Chas", "Chas", "Chas", "Disk", "Periph", "Dev", "Fan", "CU", "Cable", "Mem", "Sys",
+        "Sys", "OS", "Sys", "Grp", "RemMgmt", "Ext", "Batt", "Proc", "Conn", "Proc", "IO", "Proc",
+        "MgmtFw", "IPMI", "PCI", "PCIe", "SCSI", "SATA", "Proc", "RTC", "Ent", "Ent", "Ent", "Ent",
+        "Ent", "Ent", "Ent", "Ent", "Ent", "Ent", "Air", "Proc", "Main"
     };
 
+    std::string name = "Ent";
     if (IPMI_ENTITY_ID_VALID(entityId)) {
         if (entityId >= epics_entity_ids.size())
             throw Provider::process_error("Failed to get SDR FRU entity info - lookup table out of range");
-        return epics_entity_ids[entityId];
+        name = epics_entity_ids[entityId];
+    } else if (IPMI_ENTITY_ID_IS_CHASSIS_SPECIFIC(entityId)) {
+        name = "Chas";
+    } else if (IPMI_ENTITY_ID_IS_BOARD_SET_SPECIFIC(entityId)) {
+        name = "Board";
+    } else if (IPMI_ENTITY_ID_IS_OEM_SYSTEM_INTEGRATOR_DEFINED(entityId)) {
+        name = "Oem";
     }
 
-    if (IPMI_ENTITY_ID_IS_CHASSIS_SPECIFIC(entityId))
-        return "Chas" + std::to_string(entityInstance);
-
-    if (IPMI_ENTITY_ID_IS_BOARD_SET_SPECIFIC(entityId))
-        return "Board" + std::to_string(entityInstance);
-
-    if (IPMI_ENTITY_ID_IS_OEM_SYSTEM_INTEGRATOR_DEFINED(entityId))
-        return "Oem" + std::to_string(entityInstance);
-
-    return "Entity" + std::to_string(entityInstance);
+    name += std::to_string(address.deviceAddr) + "_" + std::to_string(address.fruId);
+    return name;
 }
 
 std::string FreeIpmiProvider::getFruDesc(ipmi_sdr_ctx_t sdr, const FreeIpmiProvider::SdrRecord& record)
@@ -279,7 +277,7 @@ std::map<std::pair<uint8_t,uint8_t>,std::string> FreeIpmiProvider::getFruEntityN
 
 std::vector<Provider::Entity> FreeIpmiProvider::getFruAreas(ipmi_fru_ctx_t fru, const FruAddress& address, const Provider::Entity& tmpl)
 {
-    if (ipmi_fru_open_device_id(fru, address.deviceId) < 0)
+    if (ipmi_fru_open_device_id(fru, address.fruId) < 0)
         throw std::runtime_error("Failed to open FRU device - " + std::string(ipmi_fru_ctx_errormsg(fru)));
 
     if (ipmi_fru_first(fru) < 0) {
@@ -618,7 +616,7 @@ bool FreeIpmiProvider::isFruLogical(ipmi_sdr_ctx_t sdr, const SdrRecord& record)
  * ===== FruAddress implementation =====
  *
  * EPICS record link specification for FRU entities
- * @ipmi <conn> FRU <device_addr>:<device_id>:<logical(1)/physical(0)>:<channel> <area> <subarea>
+ * @ipmi <conn> FRU <device_addr>:<device_id>:<lun>:<channel> <area> <subarea>
  * Example:
  * @ipmi IPMI1 FRU 32:12:1:7 CHASSIS SERIALNUM
  */
@@ -633,7 +631,7 @@ FreeIpmiProvider::FruAddress::FruAddress(const std::string& address)
 
     try {
         deviceAddr = std::stoi(addrspec[0]) & 0xFF;
-        deviceId = std::stoi(addrspec[1]) & 0xFF;
+        fruId = std::stoi(addrspec[1]) & 0xFF;
         channel = std::stoi(addrspec[3]) & 0xFF;
         area    = sections[1];
         subarea = sections[2];
@@ -644,17 +642,17 @@ FreeIpmiProvider::FruAddress::FruAddress(const std::string& address)
 
 FreeIpmiProvider::FruAddress::FruAddress(ipmi_sdr_ctx_t sdr, const SdrRecord& record)
 {
-    uint8_t logicalPhysical;
+    uint8_t logical;
     if (ipmi_sdr_parse_fru_device_locator_parameters(sdr,
                                                      record.data, record.size,
                                                      &deviceAddr,
-                                                     &deviceId,
+                                                     &fruId,
                                                      NULL, //&privateBusId,
-                                                     NULL, //&lun,
-                                                     &logicalPhysical,
+                                                     &lun,
+                                                     &logical,
                                                      &channel) < 0)
         throw Provider::process_error("Failed to parse FRU address from FRU Device Locator");
-    if (!logicalPhysical)
+    if (logical != 1)
         throw Provider::process_error("FRU logical type not supported");
 
     // stored in 7-bit form
@@ -665,7 +663,8 @@ std::string FreeIpmiProvider::FruAddress::get()
 {
     std::string addrspec;
     addrspec += std::to_string(deviceAddr) + ":";
-    addrspec += std::to_string(deviceId) + ":";
+    addrspec += std::to_string(fruId) + ":";
+    addrspec += std::to_string(lun) + ":";
     addrspec += std::to_string(channel);
     return addrspec + " " + area + " " + subarea;
 }
@@ -674,9 +673,11 @@ bool FreeIpmiProvider::FruAddress::compare(const FruAddress& other, bool checkAr
 {
     if (deviceAddr != other.deviceAddr)
         return false;
-    if (deviceId != other.deviceId)
+    if (fruId != other.fruId)
         return false;
     if (channel != other.channel)
+        return false;
+    if (lun != other.lun)
         return false;
     if (checkArea && area != other.area)
         return false;

@@ -18,12 +18,7 @@ FreeIpmiProvider::Entity FreeIpmiProvider::getSensor(ipmi_sdr_ctx_t sdr, ipmi_se
     if (ipmi_sdr_cache_first(sdr) < 0)
         throw Provider::process_error("failed to rewind SDR cache - " + std::string(ipmi_sdr_ctx_errormsg(sdr)));
 
-    uint16_t recordCount;
-    if (ipmi_sdr_cache_record_count(sdr, &recordCount) < 0)
-        throw Provider::process_error("failed to get number of SDR records - " + std::string(ipmi_sdr_ctx_errormsg(sdr)));
-
-    SdrRecord record;
-    for (auto i=recordCount; i > 0; i--, ipmi_sdr_cache_next(sdr)) {
+    do {
         uint8_t recordType;
         if (ipmi_sdr_parse_record_id_and_type(sdr, NULL, 0, NULL, &recordType) < 0)
             continue;
@@ -31,26 +26,21 @@ FreeIpmiProvider::Entity FreeIpmiProvider::getSensor(ipmi_sdr_ctx_t sdr, ipmi_se
         if (recordType != IPMI_SDR_FORMAT_FULL_SENSOR_RECORD && recordType != IPMI_SDR_FORMAT_COMPACT_SENSOR_RECORD)
             continue;
 
+        SdrRecord record;
         record.size = ipmi_sdr_cache_record_read(sdr, record.data, IPMI_SDR_MAX_RECORD_LENGTH);
         if (record.size < 0)
             continue;
 
-        uint8_t ownerId;
-        uint8_t ownerIdType;
-        if (ipmi_sdr_parse_sensor_owner_id(sdr, record.data, record.size, &ownerIdType, &ownerId) < 0 || ownerId != address.ownerId)
+        try {
+            SensorAddress tmp(sdr, record);
+            if (!tmp.compare(address))
+                continue;
+        } catch (...) {
             continue;
-
-        uint8_t ownerLun;
-        uint8_t channelNum;
-        if (ipmi_sdr_parse_sensor_owner_lun(sdr, record.data, record.size, &ownerLun, &channelNum) < 0 || ownerLun != address.ownerLun)
-            continue;
-
-        uint8_t sensorNum;
-        if (ipmi_sdr_parse_sensor_number(sdr, record.data, record.size, &sensorNum) < 0 || sensorNum != address.sensorNum)
-            continue;
+        }
 
         return getSensor(sdr, sensors, record);
-    }
+    } while (ipmi_sdr_cache_next(sdr) == 1);
 
     throw Provider::comm_error("sensor not found");
 }
@@ -67,27 +57,11 @@ FreeIpmiProvider::Entity FreeIpmiProvider::getSensor(ipmi_sdr_ctx_t sdr, ipmi_se
     if (recordType != IPMI_SDR_FORMAT_FULL_SENSOR_RECORD && recordType != IPMI_SDR_FORMAT_COMPACT_SENSOR_RECORD)
         throw std::runtime_error("SDR record not a sensor, skipping");
 
-    // Creating link constists of record owner ID&LUN and sensor number
-    entity["INP"] = getSensorAddress(sdr, record);
+    SensorAddress address(sdr, record);
+    entity["INP"] = "SENSOR " + address.get();
     entity["EGU"] = getSensorUnits(sdr, record);
-
-    // Get sensor name and put it in description field
-    uint8_t sensorNum;
-    if (ipmi_sdr_parse_sensor_number(sdr, record.data, record.size, &sensorNum) < 0) {
-        throw std::runtime_error("Failed to parse SDR record sensor number - " + std::string(ipmi_sdr_ctx_errormsg(sdr)));
-    }
-    char desc[IPMI_SDR_MAX_SENSOR_NAME_LENGTH];
-    int descLen = IPMI_SDR_MAX_SENSOR_NAME_LENGTH;
-    if (ipmi_sdr_parse_entity_sensor_name(sdr, record.data, record.size, sensorNum, 0, desc, descLen) < 0) {
-        throw std::runtime_error("Failed to parse SDR record sensor long name - " + std::string(ipmi_sdr_ctx_errormsg(sdr)));
-    }
-    entity["DESC"] = desc;
-    char name[IPMI_SDR_MAX_SENSOR_NAME_LENGTH];
-    int nameLen = IPMI_SDR_MAX_SENSOR_NAME_LENGTH;
-    if (ipmi_sdr_parse_sensor_name(sdr, record.data, record.size, sensorNum, 0, name, nameLen) < 0) {
-        throw std::runtime_error("Failed to parse SDR record sensor name - " + std::string(ipmi_sdr_ctx_errormsg(sdr)));
-    }
-    entity["NAME"] = name;
+    entity["NAME"] = getSensorName(sdr, record);
+    entity["DESC"] = getSensorDesc(sdr, record);
 
     int sharedOffset = 0; // TODO: shared sensors support
     uint8_t readingRaw = 0;
@@ -155,11 +129,7 @@ std::vector<FreeIpmiProvider::Entity> FreeIpmiProvider::getSensors(ipmi_sdr_ctx_
     if (ipmi_sdr_cache_first(sdr) < 0)
         throw std::runtime_error("failed to rewind SDR cache - " + std::string(ipmi_sdr_ctx_errormsg(sdr)));
 
-    uint16_t recordCount;
-    if (ipmi_sdr_cache_record_count(sdr, &recordCount) < 0)
-        throw std::runtime_error("failed to get number of SDR records - " + std::string(ipmi_sdr_ctx_errormsg(sdr)));
-
-    for (auto i=recordCount; i > 0; i--, ipmi_sdr_cache_next(sdr)) {
+    do {
         uint8_t recordType;
         if (ipmi_sdr_parse_record_id_and_type(sdr, NULL, 0, NULL, &recordType) < 0) {
             LOG_WARN("Failed to parse SDR record type - %s, skipping", ipmi_sdr_ctx_errormsg(sdr));
@@ -198,29 +168,38 @@ std::vector<FreeIpmiProvider::Entity> FreeIpmiProvider::getSensors(ipmi_sdr_ctx_
             sensor["NAME"] = it->second + ":" + sensor.getField<std::string>("NAME", "");
 
         v.emplace_back(std::move(sensor));
-    }
+    } while (ipmi_sdr_cache_next(sdr) == 1);
 
     return v;
 }
 
-std::string FreeIpmiProvider::getSensorAddress(ipmi_sdr_ctx_t sdr, const SdrRecord& record)
+std::string FreeIpmiProvider::getSensorName(ipmi_sdr_ctx_t sdr, const SdrRecord& record)
 {
-    SensorAddress address;
-    uint8_t ownerIdType;
-    uint8_t channelNum;
-    if (ipmi_sdr_parse_sensor_owner_id(sdr, record.data, record.size, &ownerIdType, &address.ownerId) < 0) {
-        LOG_DEBUG("Failed to parse SDR record owner id - %s, skipping", ipmi_sdr_ctx_errormsg(sdr));
-        return "";
+    uint8_t sensorNum;
+    if (ipmi_sdr_parse_sensor_number(sdr, record.data, record.size, &sensorNum) < 0)
+        throw std::runtime_error("Failed to parse SDR record sensor number - " + std::string(ipmi_sdr_ctx_errormsg(sdr)));
+
+    char name[IPMI_SDR_MAX_SENSOR_NAME_LENGTH];
+    int nameLen = IPMI_SDR_MAX_SENSOR_NAME_LENGTH;
+    if (ipmi_sdr_parse_sensor_name(sdr, record.data, record.size, sensorNum, 0, name, nameLen) < 0)
+        throw std::runtime_error("Failed to parse SDR record sensor name - " + std::string(ipmi_sdr_ctx_errormsg(sdr)));
+    name[IPMI_SDR_MAX_SENSOR_NAME_LENGTH-1] = 0;
+    return name;
+}
+
+std::string FreeIpmiProvider::getSensorDesc(ipmi_sdr_ctx_t sdr, const SdrRecord& record)
+{
+    uint8_t sensorNum;
+    if (ipmi_sdr_parse_sensor_number(sdr, record.data, record.size, &sensorNum) < 0) {
+        throw std::runtime_error("Failed to parse SDR record sensor number - " + std::string(ipmi_sdr_ctx_errormsg(sdr)));
     }
-    if (ipmi_sdr_parse_sensor_owner_lun(sdr, record.data, record.size, &address.ownerLun, &channelNum) < 0) {
-        LOG_DEBUG("Failed to parse SDR record LUN number - %s, skipping", ipmi_sdr_ctx_errormsg(sdr));
-        return "";
+    char desc[IPMI_SDR_MAX_SENSOR_NAME_LENGTH];
+    int descLen = IPMI_SDR_MAX_SENSOR_NAME_LENGTH;
+    if (ipmi_sdr_parse_entity_sensor_name(sdr, record.data, record.size, sensorNum, 0, desc, descLen) < 0) {
+        throw std::runtime_error("Failed to parse SDR record sensor long name - " + std::string(ipmi_sdr_ctx_errormsg(sdr)));
     }
-    if (ipmi_sdr_parse_sensor_number(sdr, record.data, record.size, &address.sensorNum) < 0) {
-        LOG_DEBUG("Failed to parse SDR record sensor number - %s, skipping", ipmi_sdr_ctx_errormsg(sdr));
-        return "";
-    }
-    return "SENSOR " + address.get();
+    desc[IPMI_SDR_MAX_SENSOR_NAME_LENGTH-1] = 0;
+    return desc;
 }
 
 std::string FreeIpmiProvider::getSensorUnits(ipmi_sdr_ctx_t sdr, const SdrRecord& record)
@@ -245,33 +224,54 @@ std::string FreeIpmiProvider::getSensorUnits(ipmi_sdr_ctx_t sdr, const SdrRecord
  * ===== SensorAddress implementation =====
  *
  * EPICS record link specification for SENSOR entities
- * @ipmi <conn> SENSOR <owner>:<number>:<instance>
+ * @ipmi <conn> SENSOR <owner>:<LUN>:<channel>:<sensor num>
  * Example:
- * @ipmi IPMI1 SENSOR 22:12:1
+ * @ipmi IPMI1 SENSOR 22:0:1:97
  */
 FreeIpmiProvider::SensorAddress::SensorAddress(const std::string& address)
 {
     auto tokens = common::split(address, ':');
-    if (tokens.size() != 3)
+    if (tokens.size() != 4)
         throw Provider::syntax_error("Invalid sensor address");
 
     try {
         ownerId   = std::stoi(tokens[0]) & 0xFF;
         ownerLun  = std::stoi(tokens[1]) & 0xFF;
-        sensorNum = std::stoi(tokens[2]) & 0xFF;
+        channel   = std::stoi(tokens[2]) & 0xFF;
+        sensorNum = std::stoi(tokens[3]) & 0xFF;
     } catch (std::invalid_argument) {
         throw Provider::syntax_error("Invalid sensor address");
     }
 }
 
-FreeIpmiProvider::SensorAddress::SensorAddress(uint8_t ownerId_, uint8_t ownerLun_, uint8_t sensorNum_)
-    : ownerId(ownerId_)
-    , ownerLun(ownerLun_)
-    , sensorNum(sensorNum_)
-{}
+FreeIpmiProvider::SensorAddress::SensorAddress(ipmi_sdr_ctx_t sdr, const SdrRecord& record)
+{
+    uint8_t tmp;
+
+    if (ipmi_sdr_parse_sensor_owner_id(sdr, record.data, record.size, &tmp, &ownerId) < 0)
+        throw Provider::process_error("Failed to parse sensor owner ID from SDR record");
+
+    if (ipmi_sdr_parse_sensor_owner_lun(sdr, record.data, record.size, &ownerLun, &channel) < 0)
+        throw Provider::process_error("Failed to parse sensor owner LUN from SDR record");
+
+    if (ipmi_sdr_parse_sensor_number(sdr, record.data, record.size, &sensorNum) < 0)
+        throw Provider::process_error("Failed to parse sensor number from SDR record");
+}
 
 std::string FreeIpmiProvider::SensorAddress::get()
 {
-    return std::to_string(ownerId) + ":" + std::to_string(ownerLun) + ":" + std::to_string(sensorNum);
+    return std::to_string(ownerId) + ":" + std::to_string(ownerLun) + ":" + std::to_string(channel) + ":" + std::to_string(sensorNum);
 }
 
+bool FreeIpmiProvider::SensorAddress::compare(const FreeIpmiProvider::SensorAddress& other)
+{
+    if (other.ownerId != ownerId)
+        return false;
+    if (other.ownerLun != ownerLun)
+        return false;
+    if (other.channel != channel)
+        return false;
+    if (other.sensorNum != sensorNum)
+        return false;
+    return true;
+}

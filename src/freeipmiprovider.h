@@ -50,17 +50,20 @@ class FreeIpmiProvider : public Provider
         struct SensorAddress {
             uint8_t ownerId{0};
             uint8_t ownerLun{0};
+            uint8_t channel;
             uint8_t sensorNum{0};
             SensorAddress() {};
             SensorAddress(const std::string& address);
-            SensorAddress(uint8_t ownerId_, uint8_t ownerLun_, uint8_t sensorNum_);
+            SensorAddress(ipmi_sdr_ctx_t sdr, const SdrRecord& record);
             std::string get();
+            bool compare(const SensorAddress& other);
         };
 
         struct FruAddress {
             // Supports only FRUs that can be accessed via read/write command to mgmt ctrl
             uint8_t deviceAddr;
-            uint8_t deviceId;
+            uint8_t fruId;
+            uint8_t lun;
             uint8_t channel;
             std::string area;
             std::string subarea;
@@ -144,7 +147,8 @@ class FreeIpmiProvider : public Provider
         static Entity getSensor(ipmi_sdr_ctx_t sdr, ipmi_sensor_read_ctx_t sensors, const SensorAddress& address);
         static Entity getSensor(ipmi_sdr_ctx_t sdr, ipmi_sensor_read_ctx_t sensors, const SdrRecord& record);
         static std::vector<Entity> getSensors(ipmi_sdr_ctx_t sdr, ipmi_sensor_read_ctx_t sensors);
-        static std::string getSensorAddress(ipmi_sdr_ctx_t sdr, const SdrRecord& record);
+        static std::string getSensorName(ipmi_sdr_ctx_t sdr, const SdrRecord& record);
+        static std::string getSensorDesc(ipmi_sdr_ctx_t sdr, const SdrRecord& record);
         static std::string getSensorUnits(ipmi_sdr_ctx_t sdr, const SdrRecord& record);
 
         // *** FRU functionality implemented in ipmifru.cpp file ***
