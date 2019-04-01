@@ -60,7 +60,10 @@ void Provider::tasksThread()
         m_tasks.mutex.unlock();
 
         try {
-            task.entity = getEntity(task.address);
+            auto entity = getEntity(task.address);
+            for (auto& kv: entity) {
+                task.entity[kv.first] = std::move(kv.second);
+            }
         } catch (std::runtime_error& e) {
             task.entity["SEVR"] = (int)epicsAlarmComm;
             task.entity["STAT"] = (int)epicsSevInvalid;

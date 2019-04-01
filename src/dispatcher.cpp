@@ -29,7 +29,7 @@ static epicsMutex g_mutex; //!< Global mutex to protect g_connections.
 static std::pair<std::string, std::string> _parseLink(const std::string& link)
 {
     auto tokens = common::split(link, ' ', 2);
-    if (tokens.size() < 3 || tokens[0] != "@ipmi")
+    if (tokens.size() < 3 || tokens[0] != "ipmi")
         return std::make_pair(std::string(""), std::string(""));
 
     return std::make_pair(tokens[1], tokens[2]);

@@ -98,7 +98,7 @@ class Provider {
         struct Task {
             std::string address;
             std::function<void()> callback;
-            Entity entity;
+            Entity& entity;
             Task(const std::string& address_, const std::function<void()>& cb, Entity& entity_)
                 : address(address_)
                 , callback(cb)

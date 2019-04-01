@@ -30,19 +30,27 @@ struct IpmiRecord {
 template<typename T>
 long initInpRecord(T* rec)
 {
-    if (dispatcher::checkLink(rec->inp.text) == false) {
+    if (dispatcher::checkLink(rec->inp.value.instio.string) == false) {
         if (rec->tpro == 1) {
             LOG_ERROR("invalid record link or no connection");
         }
+        rec->dpvt = nullptr;
         return -1;
     }
-    rec->dpvt = callocMustSucceed(1, sizeof(IpmiRecord), "ipmi::initGeneric");
+    void* buffer = callocMustSucceed(1, sizeof(IpmiRecord), "ipmi::initGeneric");
+    rec->dpvt = new (buffer) IpmiRecord;
     return 0;
 }
 
 static long processAiRecord(aiRecord* rec)
 {
     IpmiRecord* ctx = reinterpret_cast<IpmiRecord*>(rec->dpvt);
+    if (ctx == nullptr) {
+        // Keep PACT=1 to prevent further processing
+        rec->pact = 1;
+        recGblSetSevr(rec, epicsAlarmUDF, epicsSevInvalid);
+        return -1;
+    }
 
     if (rec->pact == 0) {
         rec->pact = 1;
