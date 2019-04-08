@@ -145,12 +145,20 @@ class Provider {
          */
         void tasksThread();
 
+        /**
+         * @brief Stop the processing thread, to be run from destructor.
+         * @param timeout in seconds to wait for thread, 0 means no timeout
+         * @return true if thread successfully stopped in given time
+         */
+        bool stopThread(double timeout=0.0);
+
     private:
         struct {
             bool processing{true};
             std::list<Task> queue;
             epicsMutex mutex;
             epicsEvent event;
+            epicsEvent stopped;
         } m_tasks;
 
         /**

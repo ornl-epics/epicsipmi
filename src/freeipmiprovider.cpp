@@ -57,6 +57,9 @@ FreeIpmiProvider::FreeIpmiProvider(const std::string& conn_id, const std::string
 
 FreeIpmiProvider::~FreeIpmiProvider()
 {
+    if (stopThread() == false)
+        LOG_WARN("Processing thread did not stop");
+
     if (m_ctx.ipmi) {
         ipmi_ctx_close(m_ctx.ipmi);
         ipmi_ctx_destroy(m_ctx.ipmi);

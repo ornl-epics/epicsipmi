@@ -30,9 +30,21 @@ Provider::Provider(const std::string& conn_id)
 
 Provider::~Provider()
 {
-    m_tasks.processing = false;
-    m_tasks.event.signal();
-    epicsThreadSleep(0.1);
+    stopThread();
+}
+
+bool Provider::stopThread(double timeout)
+{
+    if (m_tasks.processing) {
+        m_tasks.processing = false;
+        m_tasks.event.signal();
+
+        if (timeout > 0)
+            return m_tasks.stopped.wait(timeout);
+
+        m_tasks.stopped.wait();
+    }
+    return true;
 }
 
 bool Provider::schedule(const Task&& task)
@@ -75,4 +87,6 @@ void Provider::tasksThread()
         }
         task.callback();
     }
+
+    m_tasks.stopped.signal();
 }
