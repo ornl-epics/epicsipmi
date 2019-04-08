@@ -14,6 +14,7 @@
 #include <cantProceed.h>
 #include <devSup.h>
 #include <epicsExport.h>
+#include <mbbiRecord.h>
 #include <recGbl.h>
 #include <stringinRecord.h>
 
@@ -68,11 +69,11 @@ static long processAiRecord(aiRecord* rec)
     // This is the second pass, we got new value now update the record
     rec->pact = 0;
 
-    auto sevr = ctx->entity.getField<int>("SEVR", epicsAlarmNone);
-    auto stat = ctx->entity.getField<int>("STAT", epicsSevNone);
     rec->val = ctx->entity.getField<double>("VAL", rec->val);
     rec->rval = rec->val;
 
+    auto sevr = ctx->entity.getField<int>("SEVR", epicsAlarmNone);
+    auto stat = ctx->entity.getField<int>("STAT", epicsSevNone);
     (void)recGblSetSevr(rec, stat, sevr);
 
     if (rec->egu[0] == 0)
@@ -104,8 +105,42 @@ static long processStringinRecord(stringinRecord* rec)
     rec->pact = 0;
 
     common::copy(ctx->entity.getField<std::string>("VAL", rec->val), rec->val, sizeof(rec->val));
-    rec->sevr = ctx->entity.getField<int>("SEVR", rec->sevr);
-    rec->stat = ctx->entity.getField<int>("STAT", rec->stat);
+
+    auto sevr = ctx->entity.getField<int>("SEVR", epicsAlarmNone);
+    auto stat = ctx->entity.getField<int>("STAT", epicsSevNone);
+    (void)recGblSetSevr(rec, stat, sevr);
+
+    if (rec->desc[0] == 0)
+        common::copy(ctx->entity.getField<std::string>("DESC", ""), rec->desc, sizeof(rec->desc));
+
+    return 0;
+}
+
+static long processMbbiRecord(mbbiRecord* rec)
+{
+    IpmiRecord* ctx = reinterpret_cast<IpmiRecord*>(rec->dpvt);
+
+    if (rec->pact == 0) {
+        rec->pact = 1;
+
+        std::function<void()> cb = std::bind(callbackRequestProcessCallback, &ctx->callback, rec->prio, rec);
+        if (dispatcher::scheduleGet(rec->inp.value.instio.string, cb, ctx->entity) == false) {
+            // Keep PACT=1 to prevent further processing
+            recGblSetSevr(rec, epicsAlarmUDF, epicsSevInvalid);
+            return -1;
+        }
+
+        return 0;
+    }
+
+    // This is the second pass, we got new value now update the record
+    rec->pact = 0;
+
+    rec->rval  = ctx->entity.getField<int>("VAL", 0);
+
+    auto sevr = ctx->entity.getField<int>("SEVR", epicsAlarmNone);
+    auto stat = ctx->entity.getField<int>("STAT", epicsSevNone);
+    (void)recGblSetSevr(rec, stat, sevr);
 
     if (rec->desc[0] == 0)
         common::copy(ctx->entity.getField<std::string>("DESC", ""), rec->desc, sizeof(rec->desc));
@@ -152,5 +187,24 @@ struct {
    NULL  // special_linconv
 };
 epicsExportAddress(dset, devEpicsIpmiStringin);
+
+struct {
+   long            number;
+   DEVSUPFUN       report;
+   DEVSUPFUN       init;
+   DEVSUPFUN       init_record;
+   DEVSUPFUN       get_ioint_info;
+   DEVSUPFUN       read_ai;
+   DEVSUPFUN       special_linconv;
+} devEpicsIpmiMbbi = {
+   6, // number
+   NULL,                                  // report
+   NULL,                                  // once-per-IOC initialization
+   (DEVSUPFUN)initInpRecord<mbbiRecord>,  // once-per-record initialization
+   NULL,                                  // get_ioint_info
+   (DEVSUPFUN)processMbbiRecord,
+   NULL                                   // special_linconv
+};
+epicsExportAddress(dset, devEpicsIpmiMbbi);
 
 }; // extern "C"

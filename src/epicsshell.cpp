@@ -100,8 +100,9 @@ extern "C" void ipmiScanCallFunc(const iocshArgBuf* args) {
     }
 
     std::map<std::string, dispatcher::EntityType> validTypes = {
-        { "sensor", dispatcher::EntityType::SENSOR },
-        { "fru",    dispatcher::EntityType::FRU },
+        { "sensor",         dispatcher::EntityType::SENSOR },
+        { "fru",            dispatcher::EntityType::FRU },
+        { "picmg_led",      dispatcher::EntityType::PICMG_LED },
     };
 
     std::vector<dispatcher::EntityType> types;

@@ -23,6 +23,7 @@ namespace dispatcher {
 enum class EntityType {
     SENSOR,
     FRU,
+    PICMG_LED,
 };
 
 enum class AuthType {

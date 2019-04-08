@@ -659,7 +659,7 @@ FreeIpmiProvider::FruAddress::FruAddress(ipmi_sdr_ctx_t sdr, const SdrRecord& re
     deviceAddr <<= 1;
 }
 
-std::string FreeIpmiProvider::FruAddress::get()
+std::string FreeIpmiProvider::FruAddress::get() const
 {
     std::string addrspec;
     addrspec += std::to_string(deviceAddr) + ":";

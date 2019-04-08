@@ -100,6 +100,9 @@ void scan(const std::string& conn_id, const std::vector<EntityType>& types)
             } else if (type == EntityType::FRU) {
                 entities = conn->getFrus();
                 header = "FRUs:";
+            } else if (type == EntityType::PICMG_LED) {
+                entities = conn->getPicmgLeds();
+                header = "PICMG LEDs:";
             }
             print::printScanReport(header, entities);
         } catch (std::runtime_error& e) {
@@ -141,6 +144,15 @@ void printDb(const std::string& conn_id, const std::string& path, const std::str
             if (!inp.empty()) {
                 fru["INP"] = _createLink(conn_id, inp);
                 print::printRecord(dbfile, pv_prefix, fru);
+            }
+        }
+
+        auto leds = conn->getPicmgLeds();
+        for (auto& led: leds) {
+            auto inp = led.getField<std::string>("INP", "");
+            if (!inp.empty()) {
+                led["INP"] = _createLink(conn_id, inp);
+                print::printRecord(dbfile, pv_prefix, led);
             }
         }
 

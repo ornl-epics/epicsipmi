@@ -161,6 +161,8 @@ FreeIpmiProvider::Entity FreeIpmiProvider::getEntity(const std::string& address)
         return getSensor(m_ctx.sdr, m_ctx.sensors, SensorAddress(rest));
     } else if (type == "FRU") {
         return getFru(m_ctx.ipmi, m_ctx.sdr, m_ctx.fru, FruAddress(rest));
+    } else if (type == "PICMG_LED") {
+        return getPicmgLed(m_ctx.ipmi, PicmgLedAddress(rest));
     } else {
         throw Provider::syntax_error("Invalid address '" + address + "'");
     }
@@ -192,4 +194,10 @@ void FreeIpmiProvider::resetBridge(ipmi_ctx_t ipmi)
 {
     if (ipmi_ctx_set_target(ipmi, NULL, NULL) < 0)
         throw Provider::process_error("Failed to set IPMI target address - " + std::string(ipmi_ctx_errormsg(ipmi)));
+}
+
+std::vector<FreeIpmiProvider::Entity> FreeIpmiProvider::getPicmgLeds()
+{
+    common::ScopedLock lock(m_apiMutex);
+    return getPicmgLeds(m_ctx.ipmi, m_ctx.sdr);
 }

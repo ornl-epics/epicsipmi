@@ -55,7 +55,7 @@ class FreeIpmiProvider : public Provider
             SensorAddress() {};
             SensorAddress(const std::string& address);
             SensorAddress(ipmi_sdr_ctx_t sdr, const SdrRecord& record);
-            std::string get();
+            std::string get() const;
             bool compare(const SensorAddress& other);
         };
 
@@ -71,8 +71,21 @@ class FreeIpmiProvider : public Provider
             FruAddress() {};
             FruAddress(const std::string& address);
             FruAddress(ipmi_sdr_ctx_t sdr, const SdrRecord& record);
-            std::string get();
+            std::string get() const;
             bool compare(const FruAddress& other, bool checkArea=true, bool checkSubarea=true) const;
+        };
+
+        struct PicmgLedAddress {
+            uint8_t deviceAddr;
+            uint8_t channel;
+            uint8_t fruId;
+            uint8_t ledId; // ids assigned according to PICMG 3.0 Table 3-28
+
+            PicmgLedAddress() {};
+            PicmgLedAddress(const std::string& address);
+            PicmgLedAddress(uint8_t deviceAddr, uint8_t channel, uint8_t fruId, uint8_t ledId);
+            std::string get() const;
+            bool compare(const PicmgLedAddress& other) const;
         };
 
     public:
@@ -109,6 +122,12 @@ class FreeIpmiProvider : public Provider
          * @return A list of FRUs
          */
         std::vector<Entity> getFrus() override;
+
+        /**
+         * @brief Scans for all PICMG LEDs in the connected IPMI device.
+         * @return A list of LEDs
+         */
+        std::vector<Entity> getPicmgLeds() override;
 
     private:
         /**
@@ -171,4 +190,10 @@ class FreeIpmiProvider : public Provider
         static std::string getFruChassisSubarea(ipmi_fru_ctx_t fru, const FruArea& area, const std::string& subarea);
         static std::string getFruBoardSubarea(  ipmi_fru_ctx_t fru, const FruArea& area, const std::string& subarea);
         static std::string getFruProductSubarea(ipmi_fru_ctx_t fru, const FruArea& area, const std::string& subarea);
+
+        // *** PICMG functionality implemented in ipmipicmg.cpp file ***
+        std::vector<FreeIpmiProvider::Entity> getPicmgLeds(ipmi_ctx_t ipmi, ipmi_sdr_ctx_t sdr);
+        std::vector<FreeIpmiProvider::Entity> getPicmgLeds(ipmi_ctx_t ipmi, const FruAddress& address, const std::string& namePrefix);
+        FreeIpmiProvider::Entity getPicmgLedFull(ipmi_ctx_t ipmi, const PicmgLedAddress& address, const std::string& namePrefix);
+        FreeIpmiProvider::Entity getPicmgLed(ipmi_ctx_t ipmi, const PicmgLedAddress& address);
 };

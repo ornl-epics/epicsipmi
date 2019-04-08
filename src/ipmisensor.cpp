@@ -277,7 +277,7 @@ FreeIpmiProvider::SensorAddress::SensorAddress(ipmi_sdr_ctx_t sdr, const SdrReco
         throw Provider::process_error("Failed to parse sensor number from SDR record");
 }
 
-std::string FreeIpmiProvider::SensorAddress::get()
+std::string FreeIpmiProvider::SensorAddress::get() const
 {
     return std::to_string(ownerId) + ":" + std::to_string(ownerLun) + ":" + std::to_string(channel) + ":" + std::to_string(sensorNum);
 }

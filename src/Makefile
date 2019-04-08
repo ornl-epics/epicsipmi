@@ -21,6 +21,7 @@ epicsipmi_SRCS += provider.cpp
 epicsipmi_SRCS += freeipmiprovider.cpp
 epicsipmi_SRCS += ipmifru.cpp
 epicsipmi_SRCS += ipmisensor.cpp
+epicsipmi_SRCS += ipmipicmg.cpp
 
 epicsipmi_LIBS += $(EPICS_BASE_IOC_LIBS)
 epicsipmi_SYS_LIBS += ssl crypto
