@@ -72,8 +72,8 @@ static long processAiRecord(aiRecord* rec)
     rec->val = ctx->entity.getField<double>("VAL", rec->val);
     rec->rval = rec->val;
 
-    auto sevr = ctx->entity.getField<int>("SEVR", epicsAlarmNone);
-    auto stat = ctx->entity.getField<int>("STAT", epicsSevNone);
+    auto sevr = ctx->entity.getField<int>("SEVR", epicsSevNone);
+    auto stat = ctx->entity.getField<int>("STAT", epicsAlarmNone);
     (void)recGblSetSevr(rec, stat, sevr);
 
     if (rec->egu[0] == 0)
@@ -106,8 +106,8 @@ static long processStringinRecord(stringinRecord* rec)
 
     common::copy(ctx->entity.getField<std::string>("VAL", rec->val), rec->val, sizeof(rec->val));
 
-    auto sevr = ctx->entity.getField<int>("SEVR", epicsAlarmNone);
-    auto stat = ctx->entity.getField<int>("STAT", epicsSevNone);
+    auto sevr = ctx->entity.getField<int>("SEVR", epicsSevNone);
+    auto stat = ctx->entity.getField<int>("STAT", epicsAlarmNone);
     (void)recGblSetSevr(rec, stat, sevr);
 
     if (rec->desc[0] == 0)
@@ -138,8 +138,8 @@ static long processMbbiRecord(mbbiRecord* rec)
 
     rec->rval  = ctx->entity.getField<int>("VAL", 0);
 
-    auto sevr = ctx->entity.getField<int>("SEVR", epicsAlarmNone);
-    auto stat = ctx->entity.getField<int>("STAT", epicsSevNone);
+    auto sevr = ctx->entity.getField<int>("SEVR", epicsSevNone);
+    auto stat = ctx->entity.getField<int>("STAT", epicsAlarmNone);
     (void)recGblSetSevr(rec, stat, sevr);
 
     if (rec->desc[0] == 0)

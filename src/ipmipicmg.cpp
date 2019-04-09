@@ -333,6 +333,8 @@ FreeIpmiProvider::Entity FreeIpmiProvider::getPicmgLed(ipmi_ctx_t ipmi, const Pi
 
     bool bridged = setBridgeConditional(ipmi, address.channel, address.deviceAddr);
     int ret  = ipmi_cmd(ipmi, IPMI_BMC_IPMB_LUN_BMC, IPMI_NET_FN_PICMG_RQ, *obj_cmd_rq, *obj_cmd_rs);
+    if (ret < 0 && ipmi_ctx_errnum(ipmi) == IPMI_ERR_SESSION_TIMEOUT)
+        m_connected = false;
     if (bridged)
         resetBridge(ipmi);
     if (ret < 0)

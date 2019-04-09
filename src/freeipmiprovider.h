@@ -28,7 +28,7 @@ class FreeIpmiProvider : public Provider
             ipmi_fru_ctx_t fru{nullptr};
         } m_ctx;
 
-        int m_sessionTimeout{IPMI_SESSION_TIMEOUT_DEFAULT};        //!< Session timeout
+        int m_sessionTimeout{IPMI_SESSION_TIMEOUT_DEFAULT};
         int m_retransmissionTimeout{IPMI_RETRANSMISSION_TIMEOUT_DEFAULT};
         int m_cipherSuiteId{3};
         int m_k_g_len{0};
@@ -43,6 +43,7 @@ class FreeIpmiProvider : public Provider
         std::string m_protocol;
         std::string m_sdrCachePath;
         epicsMutex m_apiMutex;          //!< Serializes all external interfaces
+        bool m_connected{false};
 
         typedef common::buffer<uint8_t, IPMI_SDR_MAX_RECORD_LENGTH> SdrRecord;
         typedef common::buffer<uint8_t, IPMI_FRU_AREA_SIZE_MAX+1> FruArea;

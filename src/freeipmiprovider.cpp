@@ -40,14 +40,6 @@ FreeIpmiProvider::FreeIpmiProvider(const std::string& conn_id, const std::string
     else
         throw std::runtime_error("invalid privilege level (choose from user,operator,admin)");
 
-    m_ctx.ipmi = ipmi_ctx_create();
-    if (!m_ctx.ipmi)
-        throw std::runtime_error("can't create IPMI context");
-
-    m_ctx.sdr = ipmi_sdr_ctx_create();
-    if (!m_ctx.sdr)
-        throw std::runtime_error("can't create IPMI SDR context");
-
     // TODO: parametrize
     m_sdrCachePath = "/tmp/ipmi_sdr_" + conn_id + ".cache";
 
@@ -79,6 +71,22 @@ void FreeIpmiProvider::connect()
 {
     const char* username_ = (m_username.empty() ? nullptr : m_username.c_str());
     const char* password_ = (m_password.empty() ? nullptr : m_password.c_str());
+
+    if (m_ctx.sdr) {
+        ipmi_sdr_ctx_destroy(m_ctx.sdr);
+    }
+
+    if (m_ctx.ipmi) {
+        ipmi_ctx_close(m_ctx.ipmi);
+        ipmi_ctx_destroy(m_ctx.ipmi);
+    }
+    m_ctx.ipmi = ipmi_ctx_create();
+    if (!m_ctx.ipmi)
+        throw std::runtime_error("can't create IPMI context");
+
+    m_ctx.sdr = ipmi_sdr_ctx_create();
+    if (!m_ctx.sdr)
+        throw std::runtime_error("can't create IPMI SDR context");
 
     int connected;
     if (m_protocol == "lan_2.0") {
@@ -114,6 +122,8 @@ void FreeIpmiProvider::connect()
     /* Don't error out, if this fails we can still continue */
     if (ipmi_sensor_read_ctx_set_flags(m_ctx.sensors, sensorReadFlags) < 0)
         LOG_WARN("can't set sensor read flags - %s", ipmi_sensor_read_ctx_errormsg(m_ctx.sensors));
+
+    m_connected = true;
 }
 
 void FreeIpmiProvider::openSdrCache()
@@ -141,12 +151,16 @@ void FreeIpmiProvider::openSdrCache()
 std::vector<FreeIpmiProvider::Entity> FreeIpmiProvider::getSensors()
 {
     common::ScopedLock lock(m_apiMutex);
+    if (!m_connected)
+        connect();
     return getSensors(m_ctx.sdr, m_ctx.sensors);
 }
 
 FreeIpmiProvider::Entity FreeIpmiProvider::getEntity(const std::string& address)
 {
     common::ScopedLock lock(m_apiMutex);
+    if (!m_connected)
+        connect();
 
     // First token in address is the entity type, like 'SENSOR', 'FRU' etc.
     // Rest is type specific
@@ -171,6 +185,8 @@ FreeIpmiProvider::Entity FreeIpmiProvider::getEntity(const std::string& address)
 std::vector<FreeIpmiProvider::Entity> FreeIpmiProvider::getFrus()
 {
     common::ScopedLock lock(m_apiMutex);
+    if (!m_connected)
+        connect();
     return getFrus(m_ctx.ipmi, m_ctx.sdr, m_ctx.fru);
 }
 
@@ -199,5 +215,7 @@ void FreeIpmiProvider::resetBridge(ipmi_ctx_t ipmi)
 std::vector<FreeIpmiProvider::Entity> FreeIpmiProvider::getPicmgLeds()
 {
     common::ScopedLock lock(m_apiMutex);
+    if (!m_connected)
+        connect();
     return getPicmgLeds(m_ctx.ipmi, m_ctx.sdr);
 }
