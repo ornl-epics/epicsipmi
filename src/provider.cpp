@@ -59,11 +59,11 @@ bool Provider::schedule(const Task&& task)
 void Provider::tasksThread()
 {
     while (m_tasks.processing) {
-        m_tasks.event.wait();
-
         m_tasks.mutex.lock();
+
         if (m_tasks.queue.empty()) {
             m_tasks.mutex.unlock();
+            m_tasks.event.wait();
             continue;
         }
 
@@ -85,6 +85,7 @@ void Provider::tasksThread()
             task.entity["STAT"] = (int)epicsAlarmComm;
             LOG_ERROR("Unhandled exception getting IPMI entity");
         }
+
         task.callback();
     }
 
