@@ -88,12 +88,12 @@ FreeIpmiProvider::Entity FreeIpmiProvider::getSensor(ipmi_sdr_ctx_t sdr, ipmi_se
                 break;
         }
 
-        LOG_DEBUG("Failed to read sensor value - %s, skipping", ipmi_sensor_read_ctx_errormsg(sensors));
+        LOG_DEBUG("Failed to read sensor value (%s) - %s", address.get().c_str(), ipmi_sensor_read_ctx_errormsg(sensors));
     } else {
 
         uint8_t readingType;
         if (ipmi_sdr_parse_event_reading_type_code(sdr, record.data, record.size, &readingType) < 0) {
-            LOG_DEBUG("Failed to read sensor value type - %s, skipping", ipmi_sdr_ctx_errormsg(sdr));
+            LOG_DEBUG("Failed to read sensor value type (%s) - %s", address.get().c_str(), ipmi_sdr_ctx_errormsg(sdr));
 
         } else {
 

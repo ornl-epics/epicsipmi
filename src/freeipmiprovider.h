@@ -89,6 +89,19 @@ class FreeIpmiProvider : public Provider
             bool compare(const PicmgLedAddress& other) const;
         };
 
+        /**
+         * @brief Establishes and managed IPMB bridge if necessary depending on the address.
+         */
+        class IpmbBridgeScoped {
+        private:
+                bool bridged{false};
+                ipmi_ctx_t ipmi{nullptr};
+            public:
+                IpmbBridgeScoped(ipmi_ctx_t ipmi, uint8_t slaveAddress, uint8_t channel);
+                ~IpmbBridgeScoped();
+                void close();
+        };
+
     public:
 
         /**
@@ -149,18 +162,6 @@ class FreeIpmiProvider : public Provider
          * @return current value
          */
         Entity getEntity(const std::string& address) override;
-
-        /**
-         * Establish IPMB bridge if necessary
-         * @return true if bridge established, false otherwise
-         * @throw Provider::process_error on any IPMI library errors
-         */
-        static bool setBridgeConditional(ipmi_ctx_t ipmi, uint8_t channel, uint8_t slaveAddress);
-
-        /**
-         * @brief Resets IPMB bridge to default
-         */
-        static void resetBridge(ipmi_ctx_t ipmi);
 
         // *** SENSOR functinality implemented in ipmisensor.cpp file ***
 

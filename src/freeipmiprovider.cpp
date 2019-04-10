@@ -190,32 +190,47 @@ std::vector<FreeIpmiProvider::Entity> FreeIpmiProvider::getFrus()
     return getFrus(m_ctx.ipmi, m_ctx.sdr, m_ctx.fru);
 }
 
-bool FreeIpmiProvider::setBridgeConditional(ipmi_ctx_t ipmi, uint8_t channel, uint8_t slaveAddress)
-{
-    uint8_t channel_;
-    uint8_t slaveAddress_;
-    if (ipmi_ctx_get_target(ipmi, &channel_, &slaveAddress_) < 0)
-        throw Provider::process_error("Failed to get IPMI target address - " + std::string(ipmi_ctx_errormsg(ipmi)));
-
-    if (channel_ == channel && slaveAddress_ == slaveAddress)
-        return false;
-
-    if (ipmi_ctx_set_target(ipmi, &channel, &slaveAddress) < 0)
-        throw Provider::process_error("Failed to set IPMI target address - " + std::string(ipmi_ctx_errormsg(ipmi)));
-
-    return true;
-}
-
-void FreeIpmiProvider::resetBridge(ipmi_ctx_t ipmi)
-{
-    if (ipmi_ctx_set_target(ipmi, NULL, NULL) < 0)
-        throw Provider::process_error("Failed to set IPMI target address - " + std::string(ipmi_ctx_errormsg(ipmi)));
-}
-
 std::vector<FreeIpmiProvider::Entity> FreeIpmiProvider::getPicmgLeds()
 {
     common::ScopedLock lock(m_apiMutex);
     if (!m_connected)
         connect();
     return getPicmgLeds(m_ctx.ipmi, m_ctx.sdr);
+}
+
+FreeIpmiProvider::IpmbBridgeScoped::IpmbBridgeScoped(ipmi_ctx_t ipmi_, uint8_t slaveAddress, uint8_t channel)
+    : ipmi(ipmi_)
+{
+    uint8_t channel_;
+    uint8_t slaveAddress_;
+    if (ipmi_ctx_get_target(ipmi, &channel_, &slaveAddress_) < 0) {
+        //throw Provider::process_error("Failed to get IPMI target address - " + std::string(ipmi_ctx_errormsg(ipmi)));
+        return;
+    }
+
+    if (channel_ == channel && slaveAddress_ == slaveAddress)
+        return;
+
+    if (ipmi_ctx_set_target(ipmi, &channel, &slaveAddress) < 0) {
+        //throw Provider::process_error("Failed to set IPMI target address - " + std::string(ipmi_ctx_errormsg(ipmi)));
+        return;
+    }
+
+    bridged = true;
+}
+
+FreeIpmiProvider::IpmbBridgeScoped::~IpmbBridgeScoped()
+{
+    close();
+}
+
+void FreeIpmiProvider::IpmbBridgeScoped::close()
+{
+    if (bridged) {
+        if (ipmi_ctx_set_target(ipmi, NULL, NULL) < 0) {
+            //throw Provider::process_error("Failed to set IPMI target address - " + std::string(ipmi_ctx_errormsg(ipmi)));
+        } else {
+            bridged = false;
+        }
+    }
 }

@@ -145,14 +145,13 @@ std::vector<FreeIpmiProvider::Entity> FreeIpmiProvider::getPicmgLeds(ipmi_ctx_t 
         throw std::runtime_error("failed to allocate PICMG LED response");
 
 //ipmi_ctx_set_flags(ipmi, IPMI_FLAGS_DEBUG_DUMP);
-    bool bridged = setBridgeConditional(ipmi, fruAddress.channel, fruAddress.deviceAddr);
+    IpmbBridgeScoped bridge(ipmi, fruAddress.deviceAddr, fruAddress.channel);
     int ret = ipmi_cmd(ipmi, IPMI_BMC_IPMB_LUN_BMC, IPMI_NET_FN_PICMG_RQ, *obj_cmd_rq, *obj_cmd_rs);
-    if (bridged)
-        resetBridge(ipmi);
     if (ret < 0) {
         std::string e(ipmi_ctx_errormsg(ipmi));
         throw std::runtime_error("failed to request PICMG LED properties");
     }
+    bridge.close();
 
     uint64_t compCode;
     if (fiid_obj_get(*obj_cmd_rs, "comp_code", &compCode) < 0)
@@ -234,12 +233,11 @@ FreeIpmiProvider::Entity FreeIpmiProvider::getPicmgLedFull(ipmi_ctx_t ipmi, cons
         throw std::runtime_error("failed to allocate PICMG LED response");
 
 //ipmi_ctx_set_flags(ipmi, IPMI_FLAGS_DEBUG_DUMP);
-    bool bridged = setBridgeConditional(ipmi, address.channel, address.deviceAddr);
+    IpmbBridgeScoped bridge(ipmi, address.deviceAddr, address.channel);
     int ret = ipmi_cmd(ipmi, IPMI_BMC_IPMB_LUN_BMC, IPMI_NET_FN_PICMG_RQ, *obj_cmd_rq, *obj_cmd_rs);
-    if (bridged)
-        resetBridge(ipmi);
     if (ret < 0)
         throw std::runtime_error("failed to request PICMG LED capabilities");
+    bridge.close();
 
     uint64_t compCode;
     if (fiid_obj_get(*obj_cmd_rs, "comp_code", &compCode) < 0)
@@ -277,6 +275,7 @@ FreeIpmiProvider::Entity FreeIpmiProvider::getPicmgLedFull(ipmi_ctx_t ipmi, cons
 
     entity["INP"] = "PICMG_LED " + address.get();
     entity["NAME"] = namePrefix + ":LED" + std::to_string(address.ledId);
+    entity["DESC"] = (address.ledId < 4 ? "System Light " : "Custom Light ") + std::to_string(address.ledId);
     return entity;
 }
 
@@ -331,14 +330,13 @@ FreeIpmiProvider::Entity FreeIpmiProvider::getPicmgLed(ipmi_ctx_t ipmi, const Pi
     if (*obj_cmd_rs == nullptr)
         throw std::runtime_error("failed to allocate PICMG LED response");
 
-    bool bridged = setBridgeConditional(ipmi, address.channel, address.deviceAddr);
+    IpmbBridgeScoped bridge(ipmi, address.deviceAddr, address.channel);
     int ret  = ipmi_cmd(ipmi, IPMI_BMC_IPMB_LUN_BMC, IPMI_NET_FN_PICMG_RQ, *obj_cmd_rq, *obj_cmd_rs);
     if (ret < 0 && ipmi_ctx_errnum(ipmi) == IPMI_ERR_SESSION_TIMEOUT)
         m_connected = false;
-    if (bridged)
-        resetBridge(ipmi);
     if (ret < 0)
         throw std::runtime_error("failed to request PICMG LED state");
+    bridge.close();
 
     uint64_t compCode;
     if (fiid_obj_get(*obj_cmd_rs, "comp_code", &compCode) < 0)
