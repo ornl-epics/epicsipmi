@@ -19,6 +19,7 @@ FreeIpmiProvider::FreeIpmiProvider(const std::string& conn_id, const std::string
     , m_username(username)
     , m_password(password)
     , m_protocol(protocol)
+    , m_nextReconnect{epicsTime::getCurrent()}
 {
     if (authtype == "none" || username.empty())
         m_authType = IPMI_AUTHENTICATION_TYPE_NONE;
@@ -159,8 +160,13 @@ std::vector<FreeIpmiProvider::Entity> FreeIpmiProvider::getSensors()
 FreeIpmiProvider::Entity FreeIpmiProvider::getEntity(const std::string& address)
 {
     common::ScopedLock lock(m_apiMutex);
-    if (!m_connected)
+    if (!m_connected) {
+        if ((epicsTime::getCurrent() - m_nextReconnect) < 1.0)
+            throw std::runtime_error("Not connected");
+
+        m_nextReconnect = epicsTime::getCurrent() + 1.0;
         connect();
+    }
 
     // First token in address is the entity type, like 'SENSOR', 'FRU' etc.
     // Rest is type specific

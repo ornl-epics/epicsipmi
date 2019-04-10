@@ -13,6 +13,8 @@
 #include "common.h"
 #include "provider.h"
 
+#include <epicsTime.h>
+
 #include <string>
 #include <vector>
 
@@ -44,6 +46,7 @@ class FreeIpmiProvider : public Provider
         std::string m_sdrCachePath;
         epicsMutex m_apiMutex;          //!< Serializes all external interfaces
         bool m_connected{false};
+        epicsTime m_nextReconnect;
 
         typedef common::buffer<uint8_t, IPMI_SDR_MAX_RECORD_LENGTH> SdrRecord;
         typedef common::buffer<uint8_t, IPMI_FRU_AREA_SIZE_MAX+1> FruArea;
